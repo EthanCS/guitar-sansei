@@ -736,11 +736,8 @@
           </div>
         </div>
         <div class="control">
-          <label>节拍器</label>
-          <div class="button-row">
-            <button id="toggleMetronome" class="action-button secondary" type="button">开启</button>
-            <button id="toggleAnswer" class="action-button secondary" type="button">答案</button>
-          </div>
+          <label>答案声音</label>
+          <button id="toggleAnswer" class="action-button secondary" type="button">答案</button>
         </div>
       </section>
 
@@ -759,7 +756,7 @@
         </div>
         <div class="status-box">
           <span>节拍器</span>
-          <strong id="metronomeStatus">关闭</strong>
+          <strong id="metronomeStatus">80 BPM</strong>
         </div>
       </section>
 
@@ -873,7 +870,6 @@
       bpmInput: document.getElementById("bpmInput"),
       startPractice: document.getElementById("startPractice"),
       nextQuestion: document.getElementById("nextQuestion"),
-      toggleMetronome: document.getElementById("toggleMetronome"),
       toggleAnswer: document.getElementById("toggleAnswer"),
       timeLeft: document.getElementById("timeLeft"),
       questionCount: document.getElementById("questionCount"),
@@ -1074,6 +1070,7 @@
         if (!currentExercise.length) {
           nextRhythmQuestion(false);
         }
+        ensureMetronomeRunning();
       }
     }
 
@@ -1115,6 +1112,7 @@
     }
 
     function nextRhythmQuestion(countQuestion = true) {
+      ensureMetronomeRunning();
       const settings = getRhythmSettings();
       currentExercise = Array.from({ length: settings.beats }, () => randomPattern());
       if (countQuestion) {
@@ -1125,6 +1123,7 @@
     }
 
     function startPractice() {
+      ensureMetronomeRunning();
       if (practiceActive) {
         stopPractice();
         return;
@@ -1158,15 +1157,10 @@
       renderRhythmStatus();
     }
 
-    function toggleMetronome() {
+    function ensureMetronomeRunning() {
       if (metronomeActive) {
-        stopMetronome();
-      } else {
-        startMetronome();
+        return;
       }
-    }
-
-    function startMetronome() {
       const settings = getRhythmSettings();
       ensureAudioContext();
       metronomeActive = true;
@@ -1174,15 +1168,6 @@
       playMetronomeBeat(0);
       scheduleAnswerPulse(0);
       restartMetronomeTimer(settings.bpm);
-      renderRhythmStatus();
-    }
-
-    function stopMetronome() {
-      metronomeActive = false;
-      if (metronomeTimer) {
-        window.clearInterval(metronomeTimer);
-        metronomeTimer = null;
-      }
       renderRhythmStatus();
     }
 
@@ -1209,11 +1194,7 @@
 
     function playMetronomeBeat(beatIndex) {
       const isStrong = beatIndex === 0;
-      playDa(audioContext.currentTime, {
-        frequency: isStrong ? 1040 : 780,
-        gain: isStrong ? 0.24 : 0.13,
-        duration: isStrong ? 0.085 : 0.065
-      });
+      playMetronomeClick(audioContext.currentTime, isStrong);
     }
 
     function scheduleAnswerPulse(beatIndex) {
@@ -1251,6 +1232,29 @@
       osc.connect(filter).connect(gain).connect(audioContext.destination);
       osc.start(time);
       osc.stop(time + options.duration + 0.02);
+    }
+
+    function playMetronomeClick(time, isStrong) {
+      const source = audioContext.createBufferSource();
+      const gain = audioContext.createGain();
+      const filter = audioContext.createBiquadFilter();
+      const duration = isStrong ? 0.034 : 0.026;
+      const buffer = audioContext.createBuffer(1, Math.max(1, Math.floor(audioContext.sampleRate * duration)), audioContext.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < data.length; i += 1) {
+        const decay = Math.pow(1 - i / data.length, 2.8);
+        data[i] = (Math.random() * 2 - 1) * decay;
+      }
+      source.buffer = buffer;
+      filter.type = "highpass";
+      filter.frequency.setValueAtTime(isStrong ? 3600 : 4300, time);
+      filter.Q.setValueAtTime(0.8, time);
+      gain.gain.setValueAtTime(0.0001, time);
+      gain.gain.exponentialRampToValueAtTime(isStrong ? 0.34 : 0.18, time + 0.002);
+      gain.gain.exponentialRampToValueAtTime(0.0001, time + duration);
+      source.connect(filter).connect(gain).connect(audioContext.destination);
+      source.start(time);
+      source.stop(time + duration + 0.01);
     }
 
     function playAnswerDa(time, isStrong) {
@@ -1303,9 +1307,7 @@
       elements.timeLeft.textContent = `${shownTime}s`;
       elements.questionCount.textContent = String(questionTotal);
       elements.currentPattern.textContent = currentExercise.length === 1 ? currentExercise[0].name : `${currentExercise.length} 拍`;
-      elements.metronomeStatus.textContent = metronomeActive ? `${settings.bpm} BPM` : "关闭";
-      elements.toggleMetronome.textContent = metronomeActive ? "关闭" : "开启";
-      elements.toggleMetronome.classList.toggle("active", metronomeActive);
+      elements.metronomeStatus.textContent = `${settings.bpm} BPM`;
       elements.toggleAnswer.classList.toggle("active", answerVisible);
       elements.exerciseReadout.textContent = currentExercise.map((pattern, index) => `${index + 1}: ${pattern.name}`).join(" / ") || "随机十六分组合";
       elements.answerPanel.hidden = !answerVisible;
@@ -1519,6 +1521,7 @@
       elements.startFret.addEventListener("input", (event) => syncStartFret(event.target.value));
       elements.startFretNumber.addEventListener("input", (event) => syncStartFret(event.target.value));
       elements.practiceDuration.addEventListener("change", () => {
+        ensureMetronomeRunning();
         if (!practiceActive) {
           remainingSeconds = getRhythmSettings().seconds;
         }
@@ -1526,16 +1529,19 @@
       });
       elements.exerciseBeats.addEventListener("change", () => nextRhythmQuestion(false));
       elements.tabString.addEventListener("change", () => {
+        ensureMetronomeRunning();
         renderRhythmNotation(getRhythmSettings());
         renderRhythmStatus();
       });
       elements.tabFret.addEventListener("input", () => {
+        ensureMetronomeRunning();
         const settings = getRhythmSettings();
         elements.tabFret.value = String(settings.tabFret);
         renderRhythmNotation(settings);
         renderRhythmStatus();
       });
       elements.bpmInput.addEventListener("input", () => {
+        ensureMetronomeRunning();
         const settings = getRhythmSettings();
         elements.bpmInput.value = String(settings.bpm);
         if (metronomeActive) {
@@ -1545,8 +1551,10 @@
       });
       elements.startPractice.addEventListener("click", startPractice);
       elements.nextQuestion.addEventListener("click", () => nextRhythmQuestion(true));
-      elements.toggleMetronome.addEventListener("click", toggleMetronome);
-      elements.toggleAnswer.addEventListener("click", toggleAnswer);
+      elements.toggleAnswer.addEventListener("click", () => {
+        ensureMetronomeRunning();
+        toggleAnswer();
+      });
     }
 
     initControls();
