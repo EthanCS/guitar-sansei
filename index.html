@@ -236,6 +236,21 @@
       min-height: 36px;
     }
 
+    .manual-pattern-control {
+      grid-column: span 2;
+    }
+
+    .manual-pattern-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 6px;
+    }
+
+    .manual-pattern-grid select:disabled {
+      color: var(--muted);
+      background: #f4f1eb;
+    }
+
     .control {
       display: grid;
       gap: 8px;
@@ -718,6 +733,14 @@
         grid-template-columns: 1fr;
       }
 
+      .manual-pattern-control {
+        grid-column: auto;
+      }
+
+      .manual-pattern-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+
       .waveform-shell {
         grid-column: auto;
       }
@@ -852,6 +875,22 @@
             <option value="2">2 拍</option>
             <option value="4" selected>1 小节</option>
           </select>
+        </div>
+        <div class="control">
+          <label for="questionMode">出题方式</label>
+          <select id="questionMode">
+            <option value="random" selected>随机组合</option>
+            <option value="manual">手动指定</option>
+          </select>
+        </div>
+        <div class="control manual-pattern-control">
+          <label>每拍音符</label>
+          <div class="manual-pattern-grid">
+            <select id="manualPattern1" aria-label="第 1 拍音符"></select>
+            <select id="manualPattern2" aria-label="第 2 拍音符"></select>
+            <select id="manualPattern3" aria-label="第 3 拍音符"></select>
+            <select id="manualPattern4" aria-label="第 4 拍音符"></select>
+          </div>
         </div>
         <div class="control">
           <label for="tabString">六线谱弦位</label>
@@ -1098,6 +1137,13 @@
       scaleDegrees: document.getElementById("scaleDegrees"),
       practiceDuration: document.getElementById("practiceDuration"),
       exerciseBeats: document.getElementById("exerciseBeats"),
+      questionMode: document.getElementById("questionMode"),
+      manualPatterns: [
+        document.getElementById("manualPattern1"),
+        document.getElementById("manualPattern2"),
+        document.getElementById("manualPattern3"),
+        document.getElementById("manualPattern4")
+      ],
       tabString: document.getElementById("tabString"),
       tabFret: document.getElementById("tabFret"),
       bpmInput: document.getElementById("bpmInput"),
@@ -1138,6 +1184,19 @@
         option.textContent = `${mode.name} - ${mode.zh}`;
         elements.modeSelect.append(option);
       });
+
+      elements.manualPatterns.forEach((select, index) => {
+        const fragment = document.createDocumentFragment();
+        rhythmPatterns.forEach((pattern) => {
+          const option = document.createElement("option");
+          option.value = pattern.id;
+          option.textContent = `${index + 1}: ${pattern.name}`;
+          fragment.append(option);
+        });
+        select.replaceChildren(fragment);
+        select.value = rhythmPatterns[index % rhythmPatterns.length].id;
+      });
+      syncManualPatternControls();
 
       const fragment = document.createDocumentFragment();
       rhythmPatterns.forEach((pattern) => {
@@ -1826,7 +1885,7 @@
         renderRhythmHeader();
         renderRhythmStatus();
         if (!currentExercise.length) {
-          nextRhythmQuestion(false);
+          refreshRhythmExercise(getRhythmSettings());
         }
         ensureMetronomeRunning();
       }
@@ -1841,6 +1900,8 @@
       return {
         seconds: clampNumber(Number(elements.practiceDuration.value), 30, 180),
         beats: clampNumber(Number(elements.exerciseBeats.value), 1, 4),
+        questionMode: elements.questionMode.value === "manual" ? "manual" : "random",
+        manualPatternIds: elements.manualPatterns.map((select) => select.value),
         tabString: clampNumber(Number(elements.tabString.value), 1, 6),
         tabFret: clampNumber(Number(elements.tabFret.value), 0, 24),
         bpm: committedBpm
@@ -1894,19 +1955,44 @@
       return rhythmPatterns[Math.floor(Math.random() * rhythmPatterns.length)];
     }
 
+    function getPatternById(id) {
+      return rhythmPatterns.find((pattern) => pattern.id === id) || rhythmPatterns[0];
+    }
+
+    function buildExercise(settings = getRhythmSettings()) {
+      if (settings.questionMode === "manual") {
+        return Array.from({ length: settings.beats }, (_, index) => getPatternById(settings.manualPatternIds[index]));
+      }
+      return Array.from({ length: settings.beats }, () => randomPattern());
+    }
+
+    function syncManualPatternControls(settings = getRhythmSettings()) {
+      const manualMode = settings.questionMode === "manual";
+      elements.manualPatterns.forEach((select, index) => {
+        select.disabled = !manualMode || index >= settings.beats;
+      });
+    }
+
+    function refreshRhythmExercise(settings = getRhythmSettings(), options = {}) {
+      currentExercise = buildExercise(settings);
+      if (options.restartPhase) {
+        restartRhythmPhase(settings);
+      }
+      rebuildJudgementEvents(settings);
+      renderRhythmNotation(settings);
+      renderRhythmStatus();
+    }
+
     function nextRhythmQuestion(countQuestion = true) {
       ensureMetronomeRunning();
       if (judgingActive && audioContext) {
         markMissedJudgementEvents(audioContext.currentTime);
       }
       const settings = getRhythmSettings();
-      currentExercise = Array.from({ length: settings.beats }, () => randomPattern());
-      restartRhythmPhase(settings);
-      rebuildJudgementEvents(settings);
+      refreshRhythmExercise(settings, { restartPhase: true });
       if (countQuestion) {
         questionTotal += 1;
       }
-      renderRhythmNotation(settings);
       renderRhythmStatus();
     }
 
@@ -1925,8 +2011,8 @@
       remainingSeconds = settings.seconds;
       questionTotal = 0;
       resetJudgementStats();
-      if (!currentExercise.length) {
-        currentExercise = Array.from({ length: settings.beats }, () => randomPattern());
+      if (!currentExercise.length || currentExercise.length !== settings.beats || settings.questionMode === "manual") {
+        currentExercise = buildExercise(settings);
         renderRhythmNotation(settings);
       }
       resetProgressCursor();
@@ -2418,10 +2504,11 @@
 
     function renderRhythmStatus() {
       const settings = getRhythmSettings();
+      syncManualPatternControls(settings);
       const shownTime = practiceActive || remainingSeconds !== 0 ? remainingSeconds : settings.seconds;
       elements.timeLeft.textContent = `${shownTime}s`;
       elements.questionCount.textContent = String(questionTotal);
-      elements.currentPattern.textContent = countInActive ? "预备" : currentExercise.length === 1 ? currentExercise[0].name : `${currentExercise.length} 拍`;
+      elements.currentPattern.textContent = countInActive ? "预备" : currentExercise.length === 1 ? currentExercise[0].name : `${settings.questionMode === "manual" ? "手动" : "随机"} · ${currentExercise.length} 拍`;
       elements.metronomeStatus.textContent = countInActive ? `${settings.bpm} BPM · 预备 ${countInBeat + 1}/8` : `${settings.bpm} BPM`;
       elements.toggleAnswer.classList.toggle("active", answerVisible);
       elements.toggleAutoNext.classList.toggle("active", autoNextEnabled);
@@ -2680,16 +2767,36 @@
         }
         renderRhythmStatus();
       });
-      elements.exerciseBeats.addEventListener("change", () => nextRhythmQuestion(false));
+      elements.exerciseBeats.addEventListener("change", () => {
+        ensureMetronomeRunning();
+        refreshRhythmExercise(getRhythmSettings(), { restartPhase: true });
+      });
+      elements.questionMode.addEventListener("change", () => {
+        ensureMetronomeRunning();
+        refreshRhythmExercise(getRhythmSettings(), { restartPhase: true });
+      });
+      elements.manualPatterns.forEach((select) => {
+        select.addEventListener("change", () => {
+          const settings = getRhythmSettings();
+          syncManualPatternControls(settings);
+          if (settings.questionMode === "manual") {
+            ensureMetronomeRunning();
+            refreshRhythmExercise(settings, { restartPhase: true });
+          }
+        });
+      });
       elements.tabString.addEventListener("change", () => {
         ensureMetronomeRunning();
-        renderRhythmNotation(getRhythmSettings());
+        const settings = getRhythmSettings();
+        rebuildJudgementEvents(settings);
+        renderRhythmNotation(settings);
         renderRhythmStatus();
       });
       elements.tabFret.addEventListener("input", () => {
         ensureMetronomeRunning();
         const settings = getRhythmSettings();
         elements.tabFret.value = String(settings.tabFret);
+        rebuildJudgementEvents(settings);
         renderRhythmNotation(settings);
         renderRhythmStatus();
       });
