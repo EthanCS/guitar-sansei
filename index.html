@@ -1926,6 +1926,7 @@
         currentExercise = Array.from({ length: settings.beats }, () => randomPattern());
         renderRhythmNotation(settings);
       }
+      resetProgressCursor();
       startCountIn(settings);
     }
 
@@ -1954,6 +1955,10 @@
 
       countInActive = true;
       countInBeat = 0;
+      exerciseCycleStart = audioContext.currentTime;
+      metronomeBeatStart = exerciseCycleStart;
+      autoNextCycle = -1;
+      resetProgressCursor();
       elements.startPractice.textContent = "停止";
       elements.currentPattern.textContent = "预备";
       elements.lastJudgement.textContent = "-";
@@ -1985,7 +1990,9 @@
       stopCountIn();
       practiceActive = true;
       judgingActive = Boolean(inputStream);
+      metronomeActive = true;
       restartRhythmPhase(settings);
+      startProgressLoop();
       rebuildJudgementEvents(settings);
       questionTotal = 1;
       renderRhythmNotation(settings);
@@ -2075,7 +2082,11 @@
 
       const tick = () => {
         if (activeMode === "rhythm" && metronomeActive) {
-          updateProgressCursor(getRhythmSettings());
+          if (countInActive) {
+            resetProgressCursor();
+          } else {
+            updateProgressCursor(getRhythmSettings());
+          }
         }
         progressFrame = window.requestAnimationFrame(tick);
       };
@@ -2113,6 +2124,13 @@
       const beatIndex = Math.min(3, Math.floor(clampedBeats));
       const beatProgress = clampedBeats - beatIndex;
       return xStart + beatIndex * (beatWidth + beatGap) + beatProgress * beatWidth - 12;
+    }
+
+    function resetProgressCursor() {
+      const cursor = document.getElementById("progressCursor");
+      if (cursor) {
+        cursor.setAttribute("transform", `translate(${progressToX(0)} 0)`);
+      }
     }
 
     function ensureAudioContext() {
