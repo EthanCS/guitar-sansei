@@ -1124,7 +1124,7 @@
       ensureMetronomeRunning();
       const settings = getRhythmSettings();
       currentExercise = Array.from({ length: settings.beats }, () => randomPattern());
-      resetExerciseProgress(settings);
+      restartRhythmPhase(settings);
       if (countQuestion) {
         questionTotal += 1;
       }
@@ -1167,6 +1167,26 @@
       renderRhythmStatus();
     }
 
+    function restartRhythmPhase(settings = getRhythmSettings()) {
+      if (!audioContext) {
+        return;
+      }
+
+      if (metronomeTimer) {
+        window.clearInterval(metronomeTimer);
+        metronomeTimer = null;
+      }
+
+      metronomeBeat = 0;
+      metronomeBeatStart = audioContext.currentTime;
+      exerciseCycleStart = metronomeBeatStart;
+      autoNextCycle = -1;
+      playMetronomeBeat(0);
+      scheduleAnswerPulse(0);
+      restartMetronomeTimer(settings.bpm);
+      updateProgressCursor(settings);
+    }
+
     function ensureMetronomeRunning() {
       if (metronomeActive) {
         return;
@@ -1195,15 +1215,6 @@
         playMetronomeBeat(metronomeBeat);
         scheduleAnswerPulse(metronomeBeat);
       }, interval);
-    }
-
-    function resetExerciseProgress(settings) {
-      if (!audioContext) {
-        return;
-      }
-      exerciseCycleStart = audioContext.currentTime;
-      autoNextCycle = -1;
-      updateProgressCursor(settings);
     }
 
     function startProgressLoop() {
@@ -1238,7 +1249,6 @@
 
       if (autoNextEnabled && cycleIndex > autoNextCycle && elapsed >= cycleSeconds) {
         autoNextCycle = cycleIndex;
-        exerciseCycleStart = audioContext.currentTime;
         nextRhythmQuestion(true);
       }
     }
@@ -1636,7 +1646,7 @@
         const settings = getRhythmSettings();
         elements.bpmInput.value = String(settings.bpm);
         if (metronomeActive) {
-          restartMetronomeTimer(settings.bpm);
+          restartRhythmPhase(settings);
         }
         renderRhythmStatus();
       });
