@@ -1026,6 +1026,8 @@
     let practiceActive = false;
     let countInActive = false;
     let countInTimer = null;
+    let countInStartTimer = null;
+    let countInSpeechTimers = [];
     let countInBeat = 0;
     let remainingSeconds = 60;
     let questionTotal = 0;
@@ -1065,6 +1067,7 @@
     const attackThreshold = 0.018;
     const attackRiseThreshold = 0.012;
     const centsTolerance = 65;
+    const countInSpeechLeadMs = 150;
     const judgementWindows = {
       perfect: 0.045,
       good: 0.085,
@@ -1943,6 +1946,7 @@
         window.clearInterval(practiceTimer);
         practiceTimer = null;
       }
+      remainingSeconds = getRhythmSettings().seconds;
       renderRhythmStatus();
     }
 
@@ -1965,23 +1969,32 @@
       elements.lastJudgement.className = "";
       elements.judgementDetail.textContent = "预备：one two / one two three four";
 
-      playCountInBeat(settings);
+      scheduleCountInSpeech(settings);
       const interval = 60000 / settings.bpm;
-      countInTimer = window.setInterval(() => {
-        countInBeat += 1;
-        if (countInBeat >= 8) {
-          finishCountIn(settings);
-          return;
-        }
+      countInStartTimer = window.setTimeout(() => {
         playCountInBeat(settings);
-      }, interval);
+        countInTimer = window.setInterval(() => {
+          countInBeat += 1;
+          if (countInBeat >= 8) {
+            finishCountIn(settings);
+            return;
+          }
+          playCountInBeat(settings);
+        }, interval);
+      }, countInSpeechLeadMs);
     }
 
     function stopCountIn() {
+      if (countInStartTimer) {
+        window.clearTimeout(countInStartTimer);
+        countInStartTimer = null;
+      }
       if (countInTimer) {
         window.clearInterval(countInTimer);
         countInTimer = null;
       }
+      countInSpeechTimers.forEach((timer) => window.clearTimeout(timer));
+      countInSpeechTimers = [];
       countInActive = false;
       countInBeat = 0;
     }
@@ -2020,9 +2033,25 @@
       const labels = ["one", "", "two", "", "one", "two", "three", "four"];
       const isStrong = countInBeat === 0 || countInBeat === 4;
       playMetronomeClick(audioContext.currentTime, isStrong);
-      speakCountInWord(words[countInBeat]);
       elements.judgementDetail.textContent = `预备：${labels.slice(0, countInBeat + 1).filter(Boolean).join(" ")}`;
       elements.metronomeStatus.textContent = `${settings.bpm} BPM · 预备 ${countInBeat + 1}/8`;
+    }
+
+    function scheduleCountInSpeech(settings) {
+      const words = [
+        { beat: 0, word: "one" },
+        { beat: 2, word: "two" },
+        { beat: 4, word: "one" },
+        { beat: 5, word: "two" },
+        { beat: 6, word: "three" },
+        { beat: 7, word: "four" }
+      ];
+      const beatMs = 60000 / settings.bpm;
+      countInSpeechTimers.forEach((timer) => window.clearTimeout(timer));
+      countInSpeechTimers = words.map(({ beat, word }) => {
+        const delay = beat * beatMs;
+        return window.setTimeout(() => speakCountInWord(word), delay);
+      });
     }
 
     function restartRhythmPhase(settings = getRhythmSettings()) {
