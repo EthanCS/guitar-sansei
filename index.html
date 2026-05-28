@@ -1231,7 +1231,7 @@
       let cursor = 0;
       pattern.durations.forEach((duration, noteIndex) => {
         const time = audioContext.currentTime + cursor * secondsPerSixteenth;
-        speakDa(time, beatIndex === 0 && noteIndex === 0);
+        playAnswerDa(time, beatIndex === 0 && noteIndex === 0);
         cursor += duration;
       });
     }
@@ -1253,30 +1253,41 @@
       osc.stop(time + options.duration + 0.02);
     }
 
-    function speakDa(time, isStrong) {
-      if (!("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") {
-        playDa(time, {
-          frequency: isStrong ? 1320 : 1180,
-          gain: isStrong ? 0.18 : 0.11,
-          duration: 0.055
-        });
-        return;
+    function playAnswerDa(time, isStrong) {
+      const consonant = audioContext.createBufferSource();
+      const consonantGain = audioContext.createGain();
+      const consonantFilter = audioContext.createBiquadFilter();
+      const buffer = audioContext.createBuffer(1, Math.max(1, Math.floor(audioContext.sampleRate * 0.024)), audioContext.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < data.length; i += 1) {
+        data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
       }
+      consonant.buffer = buffer;
+      consonantFilter.type = "bandpass";
+      consonantFilter.frequency.setValueAtTime(isStrong ? 2600 : 2200, time);
+      consonantFilter.Q.setValueAtTime(3.4, time);
+      consonantGain.gain.setValueAtTime(0.0001, time);
+      consonantGain.gain.exponentialRampToValueAtTime(isStrong ? 0.24 : 0.15, time + 0.004);
+      consonantGain.gain.exponentialRampToValueAtTime(0.0001, time + 0.026);
+      consonant.connect(consonantFilter).connect(consonantGain).connect(audioContext.destination);
+      consonant.start(time);
+      consonant.stop(time + 0.032);
 
-      const delay = Math.max(0, (time - audioContext.currentTime) * 1000);
-      window.setTimeout(() => {
-        const utterance = new SpeechSynthesisUtterance("哒");
-        const voices = window.speechSynthesis.getVoices();
-        const zhVoice = voices.find((voice) => /^zh/i.test(voice.lang));
-        if (zhVoice) {
-          utterance.voice = zhVoice;
-        }
-        utterance.lang = zhVoice ? zhVoice.lang : "zh-CN";
-        utterance.rate = 1.8;
-        utterance.pitch = isStrong ? 1.25 : 1.05;
-        utterance.volume = isStrong ? 1 : 0.78;
-        window.speechSynthesis.speak(utterance);
-      }, delay);
+      const vowel = audioContext.createOscillator();
+      const vowelGain = audioContext.createGain();
+      const vowelFilter = audioContext.createBiquadFilter();
+      vowel.type = "sawtooth";
+      vowel.frequency.setValueAtTime(isStrong ? 190 : 175, time + 0.012);
+      vowel.frequency.exponentialRampToValueAtTime(isStrong ? 150 : 138, time + 0.095);
+      vowelFilter.type = "bandpass";
+      vowelFilter.frequency.setValueAtTime(isStrong ? 760 : 690, time + 0.012);
+      vowelFilter.Q.setValueAtTime(7, time + 0.012);
+      vowelGain.gain.setValueAtTime(0.0001, time + 0.012);
+      vowelGain.gain.exponentialRampToValueAtTime(isStrong ? 0.22 : 0.13, time + 0.025);
+      vowelGain.gain.exponentialRampToValueAtTime(0.0001, time + 0.105);
+      vowel.connect(vowelFilter).connect(vowelGain).connect(audioContext.destination);
+      vowel.start(time + 0.012);
+      vowel.stop(time + 0.12);
     }
 
     function toggleAnswer() {
