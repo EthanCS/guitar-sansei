@@ -221,7 +221,19 @@
     }
 
     .rhythm-controls {
-      grid-template-columns: repeat(4, minmax(150px, 1fr));
+      grid-template-columns: repeat(6, minmax(118px, 1fr));
+      gap: 10px;
+      padding: 12px;
+    }
+
+    .rhythm-controls .control {
+      gap: 6px;
+    }
+
+    .rhythm-controls select,
+    .rhythm-controls input[type="number"],
+    .rhythm-controls .action-button {
+      min-height: 36px;
     }
 
     .control {
@@ -564,15 +576,15 @@
     .rhythm-status {
       display: grid;
       grid-template-columns: repeat(4, minmax(150px, 1fr));
-      gap: 12px;
-      margin-bottom: 16px;
+      gap: 8px;
+      margin-bottom: 12px;
     }
 
     .rhythm-judgement {
       display: grid;
-      grid-template-columns: minmax(180px, 1.35fr) repeat(5, minmax(110px, 1fr));
-      gap: 12px;
-      margin-bottom: 16px;
+      grid-template-columns: minmax(150px, 1.25fr) repeat(5, minmax(86px, 1fr));
+      gap: 8px;
+      margin-bottom: 12px;
     }
 
     .status-box {
@@ -594,6 +606,16 @@
     .status-box strong {
       font-size: 24px;
       line-height: 1.1;
+    }
+
+    .rhythm-status .status-box,
+    .rhythm-judgement .status-box {
+      padding: 10px 12px;
+    }
+
+    .rhythm-status .status-box strong,
+    .rhythm-judgement .status-box strong {
+      font-size: 20px;
     }
 
     .status-box small {
@@ -1900,6 +1922,10 @@
       remainingSeconds = settings.seconds;
       questionTotal = 0;
       resetJudgementStats();
+      if (!currentExercise.length) {
+        currentExercise = Array.from({ length: settings.beats }, () => randomPattern());
+        renderRhythmNotation(settings);
+      }
       startCountIn(settings);
     }
 
@@ -1932,13 +1958,13 @@
       elements.currentPattern.textContent = "预备";
       elements.lastJudgement.textContent = "-";
       elements.lastJudgement.className = "";
-      elements.judgementDetail.textContent = "预备：one two, one two three four";
+      elements.judgementDetail.textContent = "预备：one two / one two three four";
 
       playCountInBeat(settings);
       const interval = 60000 / settings.bpm;
       countInTimer = window.setInterval(() => {
         countInBeat += 1;
-        if (countInBeat >= 6) {
+        if (countInBeat >= 8) {
           finishCountIn(settings);
           return;
         }
@@ -1959,7 +1985,10 @@
       stopCountIn();
       practiceActive = true;
       judgingActive = Boolean(inputStream);
-      nextRhythmQuestion(true);
+      restartRhythmPhase(settings);
+      rebuildJudgementEvents(settings);
+      questionTotal = 1;
+      renderRhythmNotation(settings);
       renderRhythmStatus();
 
       practiceTimer = window.setInterval(() => {
@@ -1973,12 +2002,20 @@
     }
 
     function playCountInBeat(settings) {
-      const words = ["one", "two", "one", "two", "three", "four"];
-      const isStrong = countInBeat === 0 || countInBeat === 2;
+      const words = {
+        0: "one",
+        2: "two",
+        4: "one",
+        5: "two",
+        6: "three",
+        7: "four"
+      };
+      const labels = ["one", "", "two", "", "one", "two", "three", "four"];
+      const isStrong = countInBeat === 0 || countInBeat === 4;
       playMetronomeClick(audioContext.currentTime, isStrong);
       speakCountInWord(words[countInBeat]);
-      elements.judgementDetail.textContent = `预备：${words.slice(0, countInBeat + 1).join(" ")}`;
-      elements.metronomeStatus.textContent = `${settings.bpm} BPM · 预备 ${countInBeat + 1}/6`;
+      elements.judgementDetail.textContent = `预备：${labels.slice(0, countInBeat + 1).filter(Boolean).join(" ")}`;
+      elements.metronomeStatus.textContent = `${settings.bpm} BPM · 预备 ${countInBeat + 1}/8`;
     }
 
     function restartRhythmPhase(settings = getRhythmSettings()) {
@@ -2296,7 +2333,7 @@
       elements.timeLeft.textContent = `${shownTime}s`;
       elements.questionCount.textContent = String(questionTotal);
       elements.currentPattern.textContent = countInActive ? "预备" : currentExercise.length === 1 ? currentExercise[0].name : `${currentExercise.length} 拍`;
-      elements.metronomeStatus.textContent = countInActive ? `${settings.bpm} BPM · 预备 ${countInBeat + 1}/6` : `${settings.bpm} BPM`;
+      elements.metronomeStatus.textContent = countInActive ? `${settings.bpm} BPM · 预备 ${countInBeat + 1}/8` : `${settings.bpm} BPM`;
       elements.toggleAnswer.classList.toggle("active", answerVisible);
       elements.toggleAutoNext.classList.toggle("active", autoNextEnabled);
       elements.toggleAutoNext.textContent = autoNextEnabled ? "自动中" : "自动下一题";
