@@ -1424,9 +1424,19 @@
       }
 
       const parts = currentExercise.map((pattern, index) => {
-        return `第 ${index + 1} 拍：按 ${pattern.count} 弹 ${pattern.name}`;
+        return `第 ${index + 1} 拍：按 ${pattern.count} 弹 ${pattern.name}，拨片 ${describePickPattern(pattern)}`;
       });
       return `用 ${selectedNote.string.number}弦 ${settings.tabFret} 品（${selectedNote.name}，吉他谱实际音高，五线谱按吉他记谱高八度显示）弹。${parts.join("；")}。节拍器强拍为第 1 拍，其他拍为弱拍；答案声音会在每个需要拨弦的位置发“哒”。`;
+    }
+
+    function describePickPattern(pattern) {
+      let cursor = 0;
+      const directions = pattern.durations.map((duration) => {
+        const direction = getPickDirection(cursor);
+        cursor += duration;
+        return direction;
+      });
+      return directions.join("-");
     }
 
     function renderRhythmNotation(settings) {
@@ -1473,6 +1483,7 @@
       }
 
       lines.push(`<text x="18" y="${tabTop + 35}" font-size="24" font-weight="800" fill="#202124">TAB</text>`);
+      lines.push(`<text x="18" y="${tabTop - 39}" font-size="13" font-weight="800" fill="#bd4b32">拨片</text>`);
 
       for (let beatIndex = 0; beatIndex < displayBeats; beatIndex += 1) {
         const pattern = currentExercise[beatIndex];
@@ -1499,6 +1510,7 @@
         if (note.duration === 3) {
           lines.push(`<circle cx="${note.x + 14}" cy="${note.staffY - 1}" r="1.8" fill="#202124"/>`);
         }
+        lines.push(`<text x="${note.x}" y="${tabTop - 39}" text-anchor="middle" font-size="14" font-weight="850" fill="#bd4b32">${getPickDirection(note.onset)}</text>`);
         if (note.duration < 4 && !beams.some((beam) => beam.notes.includes(note))) {
           const hook = note.duration === 1 ? 16 : 12;
           lines.push(`<path d="M ${stemX} ${stemTop} q ${hook} 4 ${hook} 14" fill="none" stroke="#202124" stroke-width="2"/>`);
@@ -1549,13 +1561,18 @@
             duration,
             beatIndex,
             onset: cursor,
-            pulse: beatIndex * 4 + cursor
+            pulse: beatIndex * 4 + cursor,
+            pick: getPickDirection(cursor)
           });
           cursor += duration;
         });
       });
 
       return events;
+    }
+
+    function getPickDirection(onset) {
+      return onset % 2 === 0 ? "下" : "上";
     }
 
     function midiToStaffY(midi) {
