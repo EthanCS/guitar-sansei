@@ -568,6 +568,13 @@
       margin-bottom: 16px;
     }
 
+    .rhythm-judgement {
+      display: grid;
+      grid-template-columns: minmax(180px, 1.35fr) repeat(5, minmax(110px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
     .status-box {
       padding: 14px 16px;
       border: 1px solid var(--line);
@@ -587,6 +594,30 @@
     .status-box strong {
       font-size: 24px;
       line-height: 1.1;
+    }
+
+    .status-box small {
+      display: block;
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.25;
+    }
+
+    .judgement-perfect {
+      color: #1f8f55;
+    }
+
+    .judgement-good {
+      color: var(--root);
+    }
+
+    .judgement-normal {
+      color: #a56b13;
+    }
+
+    .judgement-wrong {
+      color: var(--accent);
     }
 
     .notation-panel {
@@ -633,6 +664,7 @@
       .controls,
       .summary-grid,
       .rhythm-status,
+      .rhythm-judgement,
       .audio-panel {
         grid-template-columns: 1fr 1fr;
       }
@@ -659,6 +691,7 @@
       .summary-grid,
       .rhythm-controls,
       .rhythm-status,
+      .rhythm-judgement,
       .audio-panel {
         grid-template-columns: 1fr;
       }
@@ -852,6 +885,34 @@
         </div>
       </section>
 
+      <section class="rhythm-judgement" aria-label="练习判定">
+        <div class="status-box">
+          <span>实时判定</span>
+          <strong id="lastJudgement">-</strong>
+          <small id="judgementDetail">开始练习后记录</small>
+        </div>
+        <div class="status-box">
+          <span>Perfect</span>
+          <strong id="perfectCount" class="judgement-perfect">0</strong>
+        </div>
+        <div class="status-box">
+          <span>Good</span>
+          <strong id="goodCount" class="judgement-good">0</strong>
+        </div>
+        <div class="status-box">
+          <span>Normal</span>
+          <strong id="normalCount" class="judgement-normal">0</strong>
+        </div>
+        <div class="status-box">
+          <span>Wrong</span>
+          <strong id="wrongCount" class="judgement-wrong">0</strong>
+        </div>
+        <div class="status-box">
+          <span>命中率</span>
+          <strong id="accuracyReadout">0%</strong>
+        </div>
+      </section>
+
       <section class="panel notation-panel" aria-label="五线谱和吉他六线谱">
         <div class="section-header">
           <h2>谱面</h2>
@@ -946,6 +1007,28 @@
     let waveformFrame = null;
     let waveformData = null;
     let inputLevel = 0;
+    let pitchBuffer = null;
+    let previousInputLevel = 0;
+    let lastDetectedAttackTime = -Infinity;
+    let judgingActive = false;
+    let judgementEvents = [];
+    let judgementCycleSeconds = 0;
+    let judgementQuestionId = 0;
+    let matchedJudgementKeys = new Set();
+    let missedJudgementKeys = new Set();
+    let judgementStats = createEmptyJudgementStats();
+    let lastJudgementResult = null;
+    const inputLatencyCompensation = 0.045;
+    const attackCooldown = 0.08;
+    const attackThreshold = 0.018;
+    const attackRiseThreshold = 0.012;
+    const centsTolerance = 65;
+    const judgementWindows = {
+      perfect: 0.045,
+      good: 0.085,
+      normal: 0.14,
+      wrong: 0.22
+    };
 
     const elements = {
       currentLabel: document.getElementById("currentLabel"),
@@ -981,6 +1064,13 @@
       questionCount: document.getElementById("questionCount"),
       currentPattern: document.getElementById("currentPattern"),
       metronomeStatus: document.getElementById("metronomeStatus"),
+      lastJudgement: document.getElementById("lastJudgement"),
+      judgementDetail: document.getElementById("judgementDetail"),
+      perfectCount: document.getElementById("perfectCount"),
+      goodCount: document.getElementById("goodCount"),
+      normalCount: document.getElementById("normalCount"),
+      wrongCount: document.getElementById("wrongCount"),
+      accuracyReadout: document.getElementById("accuracyReadout"),
       exerciseReadout: document.getElementById("exerciseReadout"),
       notationMount: document.getElementById("notationMount"),
       patternBank: document.getElementById("patternBank")
@@ -1072,6 +1162,7 @@
         inputAnalyser.fftSize = 2048;
         inputAnalyser.smoothingTimeConstant = 0.72;
         waveformData = new Uint8Array(inputAnalyser.fftSize);
+        pitchBuffer = new Float32Array(inputAnalyser.fftSize);
         inputSource.connect(inputAnalyser);
         elements.toggleAudioInput.textContent = "关闭";
         elements.toggleAudioInput.classList.add("active");
@@ -1081,6 +1172,7 @@
         if (track && track.getSettings().deviceId) {
           elements.audioInputSelect.value = track.getSettings().deviceId;
         }
+        renderJudgementStatus();
         startWaveformLoop();
       } catch (error) {
         stopAudioInput();
@@ -1106,11 +1198,18 @@
 
       inputAnalyser = null;
       waveformData = null;
+      pitchBuffer = null;
       inputLevel = 0;
+      previousInputLevel = 0;
+      lastDetectedAttackTime = -Infinity;
       elements.toggleAudioInput.textContent = "开启";
       elements.toggleAudioInput.classList.remove("active");
       updateAudioInputStatus("idle", "未开启", "选择麦克风或声卡输入");
       drawEmptyWaveform();
+      if (judgingActive) {
+        judgingActive = false;
+        renderJudgementStatus();
+      }
     }
 
     function startWaveformLoop() {
@@ -1164,6 +1263,8 @@
 
       inputLevel = Math.sqrt(sumSquares / waveformData.length);
       updateInputSignalStatus(inputLevel, peak);
+      detectJudgementAttack(inputLevel, peak);
+      previousInputLevel = inputLevel;
     }
 
     function drawEmptyWaveform() {
@@ -1229,6 +1330,291 @@
         return "所选输入设备不可用";
       }
       return "无法开启音源输入";
+    }
+
+    function detectJudgementAttack(level, peak) {
+      if (!judgingActive || !practiceActive || !audioContext || !inputAnalyser || !pitchBuffer) {
+        return;
+      }
+
+      const now = audioContext.currentTime - inputLatencyCompensation;
+      const isAttack = level > attackThreshold
+        && level - previousInputLevel > attackRiseThreshold
+        && peak > 0.04
+        && now - lastDetectedAttackTime > attackCooldown;
+
+      if (!isAttack) {
+        markMissedJudgementEvents(now);
+        return;
+      }
+
+      lastDetectedAttackTime = now;
+      const pitch = detectPitch();
+      judgePerformedNote(now, pitch);
+      markMissedJudgementEvents(now);
+    }
+
+    function detectPitch() {
+      inputAnalyser.getFloatTimeDomainData(pitchBuffer);
+      const frequency = autoCorrelatePitch(pitchBuffer, audioContext.sampleRate);
+      if (!frequency) {
+        return null;
+      }
+      return {
+        frequency,
+        midi: 69 + 12 * Math.log2(frequency / 440)
+      };
+    }
+
+    function autoCorrelatePitch(buffer, sampleRate) {
+      let rms = 0;
+      for (let i = 0; i < buffer.length; i += 1) {
+        rms += buffer[i] * buffer[i];
+      }
+      rms = Math.sqrt(rms / buffer.length);
+      if (rms < 0.01) {
+        return null;
+      }
+
+      let start = 0;
+      let end = buffer.length - 1;
+      const threshold = 0.2;
+      for (let i = 0; i < buffer.length / 2; i += 1) {
+        if (Math.abs(buffer[i]) < threshold) {
+          start = i;
+          break;
+        }
+      }
+      for (let i = 1; i < buffer.length / 2; i += 1) {
+        if (Math.abs(buffer[buffer.length - i]) < threshold) {
+          end = buffer.length - i;
+          break;
+        }
+      }
+
+      const trimmed = buffer.slice(start, end);
+      const correlations = new Array(trimmed.length).fill(0);
+      for (let lag = 0; lag < trimmed.length; lag += 1) {
+        for (let i = 0; i < trimmed.length - lag; i += 1) {
+          correlations[lag] += trimmed[i] * trimmed[i + lag];
+        }
+      }
+
+      let d = 0;
+      while (d < correlations.length - 1 && correlations[d] > correlations[d + 1]) {
+        d += 1;
+      }
+
+      let maxValue = -Infinity;
+      let maxPosition = -1;
+      for (let i = d; i < correlations.length; i += 1) {
+        if (correlations[i] > maxValue) {
+          maxValue = correlations[i];
+          maxPosition = i;
+        }
+      }
+
+      if (maxPosition <= 0) {
+        return null;
+      }
+
+      const x1 = correlations[maxPosition - 1] || 0;
+      const x2 = correlations[maxPosition] || 0;
+      const x3 = correlations[maxPosition + 1] || 0;
+      const correction = (x1 - x3) / (2 * (x1 - 2 * x2 + x3));
+      const refinedPosition = Number.isFinite(correction) ? maxPosition + correction : maxPosition;
+      const frequency = sampleRate / refinedPosition;
+      return frequency >= 70 && frequency <= 1400 ? frequency : null;
+    }
+
+    function judgePerformedNote(time, pitch) {
+      const target = findNearestJudgementEvent(time);
+      if (!target) {
+        recordJudgement("wrong", "多弹 / 时机偏离", pitch, null, null);
+        return;
+      }
+
+      const pitchCents = pitch ? 1200 * Math.log2(pitch.frequency / target.frequency) : Infinity;
+      const pitchOk = Number.isFinite(pitchCents) && Math.abs(pitchCents) <= centsTolerance;
+      const timingError = time - target.time;
+      const absTimingError = Math.abs(timingError);
+      let grade = "wrong";
+
+      if (pitchOk) {
+        if (absTimingError <= judgementWindows.perfect) {
+          grade = "perfect";
+        } else if (absTimingError <= judgementWindows.good) {
+          grade = "good";
+        } else if (absTimingError <= judgementWindows.normal) {
+          grade = "normal";
+        }
+      }
+
+      matchedJudgementKeys.add(target.key);
+      recordJudgement(grade, formatJudgementDetail(timingError, pitchCents, pitchOk), pitch, target, timingError);
+    }
+
+    function findNearestJudgementEvent(time) {
+      if (!judgementEvents.length || judgementCycleSeconds <= 0) {
+        return null;
+      }
+
+      const elapsed = time - exerciseCycleStart;
+      if (elapsed < -judgementWindows.wrong) {
+        return null;
+      }
+
+      const baseCycle = Math.max(0, Math.floor(Math.max(0, elapsed) / judgementCycleSeconds));
+      let best = null;
+      for (let cycle = Math.max(0, baseCycle - 1); cycle <= baseCycle + 1; cycle += 1) {
+        judgementEvents.forEach((event) => {
+          const eventTime = exerciseCycleStart + cycle * judgementCycleSeconds + event.offset;
+          const error = time - eventTime;
+          const key = getJudgementKey(cycle, event.index);
+          if (matchedJudgementKeys.has(key) || missedJudgementKeys.has(key)) {
+            return;
+          }
+          if (Math.abs(error) <= judgementWindows.wrong && (!best || Math.abs(error) < Math.abs(best.error))) {
+            best = { ...event, time: eventTime, error, cycle, key };
+          }
+        });
+      }
+      return best;
+    }
+
+    function markMissedJudgementEvents(now) {
+      if (!judgingActive || !judgementEvents.length || judgementCycleSeconds <= 0) {
+        return;
+      }
+
+      const elapsed = now - exerciseCycleStart;
+      if (elapsed < 0) {
+        return;
+      }
+
+      const maxCycle = Math.floor(elapsed / judgementCycleSeconds);
+      for (let cycle = 0; cycle <= maxCycle; cycle += 1) {
+        judgementEvents.forEach((event) => {
+          const key = getJudgementKey(cycle, event.index);
+          const eventTime = exerciseCycleStart + cycle * judgementCycleSeconds + event.offset;
+          if (!matchedJudgementKeys.has(key) && !missedJudgementKeys.has(key) && now - eventTime > judgementWindows.wrong) {
+            missedJudgementKeys.add(key);
+            recordJudgement("wrong", "漏弹", null, { ...event, time: eventTime, key }, null);
+          }
+        });
+      }
+    }
+
+    function rebuildJudgementEvents(settings = getRhythmSettings()) {
+      const selectedNote = getSelectedNote(settings);
+      const secondsPerSixteenth = 60 / settings.bpm / 4;
+      let eventIndex = 0;
+      judgementEvents = [];
+      currentExercise.forEach((pattern, beatIndex) => {
+        let cursor = 0;
+        pattern.durations.forEach((duration) => {
+          judgementEvents.push({
+            index: eventIndex,
+            offset: (beatIndex * 4 + cursor) * secondsPerSixteenth,
+            frequency: midiToFrequency(selectedNote.midi),
+            midi: selectedNote.midi,
+            noteName: selectedNote.name
+          });
+          eventIndex += 1;
+          cursor += duration;
+        });
+      });
+      judgementCycleSeconds = Math.max(1, currentExercise.length || settings.beats) * 60 / settings.bpm;
+      judgementQuestionId += 1;
+      matchedJudgementKeys = new Set();
+      missedJudgementKeys = new Set();
+    }
+
+    function resetJudgementStats() {
+      judgementStats = createEmptyJudgementStats();
+      lastJudgementResult = null;
+      judgementEvents = [];
+      judgementCycleSeconds = 0;
+      judgementQuestionId += 1;
+      matchedJudgementKeys = new Set();
+      missedJudgementKeys = new Set();
+      previousInputLevel = 0;
+      lastDetectedAttackTime = -Infinity;
+      renderJudgementStatus();
+    }
+
+    function createEmptyJudgementStats() {
+      return {
+        perfect: 0,
+        good: 0,
+        normal: 0,
+        wrong: 0,
+        total: 0
+      };
+    }
+
+    function recordJudgement(grade, detail, pitch, target, timingError) {
+      judgementStats[grade] += 1;
+      judgementStats.total += 1;
+      lastJudgementResult = {
+        grade,
+        detail,
+        pitch,
+        target,
+        timingError
+      };
+      renderJudgementStatus();
+    }
+
+    function renderJudgementStatus() {
+      const labels = {
+        perfect: "Perfect",
+        good: "Good",
+        normal: "Normal",
+        wrong: "Wrong"
+      };
+      const grade = lastJudgementResult ? lastJudgementResult.grade : null;
+      const counted = judgementStats.perfect + judgementStats.good + judgementStats.normal;
+      const total = judgementStats.total;
+      const accuracy = total > 0 ? Math.round((counted / total) * 100) : 0;
+
+      elements.lastJudgement.textContent = grade ? labels[grade] : "-";
+      elements.lastJudgement.className = grade ? `judgement-${grade}` : "";
+      elements.judgementDetail.textContent = lastJudgementResult
+        ? lastJudgementResult.detail
+        : inputStream ? "开始练习后记录" : "先开启音源输入";
+      elements.perfectCount.textContent = String(judgementStats.perfect);
+      elements.goodCount.textContent = String(judgementStats.good);
+      elements.normalCount.textContent = String(judgementStats.normal);
+      elements.wrongCount.textContent = String(judgementStats.wrong);
+      elements.accuracyReadout.textContent = `${accuracy}%`;
+    }
+
+    function renderJudgementSummary() {
+      if (judgementStats.total === 0) {
+        elements.judgementDetail.textContent = inputStream ? "本次没有记录到弹奏" : "本次未开启音源输入";
+        return;
+      }
+
+      const counted = judgementStats.perfect + judgementStats.good + judgementStats.normal;
+      const accuracy = Math.round((counted / judgementStats.total) * 100);
+      elements.judgementDetail.textContent = `训练结束 · ${counted}/${judgementStats.total} · ${accuracy}%`;
+    }
+
+    function formatJudgementDetail(timingError, pitchCents, pitchOk) {
+      const timingText = `${timingError >= 0 ? "+" : ""}${Math.round(timingError * 1000)}ms`;
+      if (!pitchOk) {
+        return Number.isFinite(pitchCents) ? `音高偏差 ${Math.round(pitchCents)} cents` : "未识别音高";
+      }
+      return `节拍 ${timingText} · 音高 ${Math.round(pitchCents)} cents`;
+    }
+
+    function getJudgementKey(cycle, eventIndex) {
+      return `${judgementQuestionId}:${cycle}:${eventIndex}`;
+    }
+
+    function midiToFrequency(midi) {
+      return 440 * Math.pow(2, (midi - 69) / 12);
     }
 
     function clampNumber(value, min, max) {
@@ -1448,9 +1834,13 @@
 
     function nextRhythmQuestion(countQuestion = true) {
       ensureMetronomeRunning();
+      if (judgingActive && audioContext) {
+        markMissedJudgementEvents(audioContext.currentTime);
+      }
       const settings = getRhythmSettings();
       currentExercise = Array.from({ length: settings.beats }, () => randomPattern());
       restartRhythmPhase(settings);
+      rebuildJudgementEvents(settings);
       if (countQuestion) {
         questionTotal += 1;
       }
@@ -1458,17 +1848,23 @@
       renderRhythmStatus();
     }
 
-    function startPractice() {
+    async function startPractice() {
       ensureMetronomeRunning();
       if (practiceActive) {
         stopPractice();
         return;
       }
 
+      if (!inputStream) {
+        await startAudioInput();
+      }
+
       const settings = getRhythmSettings();
       remainingSeconds = settings.seconds;
       questionTotal = 0;
+      resetJudgementStats();
       practiceActive = true;
+      judgingActive = Boolean(inputStream);
       elements.startPractice.textContent = "停止";
       nextRhythmQuestion(true);
       renderRhythmStatus();
@@ -1484,7 +1880,12 @@
     }
 
     function stopPractice() {
+      if (judgingActive && audioContext) {
+        markMissedJudgementEvents(audioContext.currentTime + judgementWindows.wrong - 0.001);
+      }
       practiceActive = false;
+      judgingActive = false;
+      renderJudgementSummary();
       elements.startPractice.textContent = "开始";
       if (practiceTimer) {
         window.clearInterval(practiceTimer);
