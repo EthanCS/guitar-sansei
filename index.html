@@ -736,8 +736,11 @@
           </div>
         </div>
         <div class="control">
-          <label>答案声音</label>
-          <button id="toggleAnswer" class="action-button secondary" type="button">答案</button>
+          <label>练习辅助</label>
+          <div class="button-row">
+            <button id="toggleAnswer" class="action-button secondary" type="button">答案</button>
+            <button id="toggleAutoNext" class="action-button secondary" type="button">自动下一题</button>
+          </div>
         </div>
       </section>
 
@@ -846,6 +849,11 @@
     let metronomeActive = false;
     let metronomeTimer = null;
     let metronomeBeat = 0;
+    let metronomeBeatStart = 0;
+    let progressFrame = null;
+    let exerciseCycleStart = 0;
+    let autoNextEnabled = false;
+    let autoNextCycle = -1;
     let audioContext = null;
 
     const elements = {
@@ -871,6 +879,7 @@
       startPractice: document.getElementById("startPractice"),
       nextQuestion: document.getElementById("nextQuestion"),
       toggleAnswer: document.getElementById("toggleAnswer"),
+      toggleAutoNext: document.getElementById("toggleAutoNext"),
       timeLeft: document.getElementById("timeLeft"),
       questionCount: document.getElementById("questionCount"),
       currentPattern: document.getElementById("currentPattern"),
@@ -1115,6 +1124,7 @@
       ensureMetronomeRunning();
       const settings = getRhythmSettings();
       currentExercise = Array.from({ length: settings.beats }, () => randomPattern());
+      resetExerciseProgress(settings);
       if (countQuestion) {
         questionTotal += 1;
       }
@@ -1165,9 +1175,12 @@
       ensureAudioContext();
       metronomeActive = true;
       metronomeBeat = 0;
+      metronomeBeatStart = audioContext.currentTime;
+      exerciseCycleStart = audioContext.currentTime;
       playMetronomeBeat(0);
       scheduleAnswerPulse(0);
       restartMetronomeTimer(settings.bpm);
+      startProgressLoop();
       renderRhythmStatus();
     }
 
@@ -1178,9 +1191,67 @@
       const interval = 60000 / bpm;
       metronomeTimer = window.setInterval(() => {
         metronomeBeat = (metronomeBeat + 1) % 4;
+        metronomeBeatStart = audioContext.currentTime;
         playMetronomeBeat(metronomeBeat);
         scheduleAnswerPulse(metronomeBeat);
       }, interval);
+    }
+
+    function resetExerciseProgress(settings) {
+      if (!audioContext) {
+        return;
+      }
+      exerciseCycleStart = audioContext.currentTime;
+      autoNextCycle = -1;
+      updateProgressCursor(settings);
+    }
+
+    function startProgressLoop() {
+      if (progressFrame) {
+        return;
+      }
+
+      const tick = () => {
+        if (activeMode === "rhythm" && metronomeActive) {
+          updateProgressCursor(getRhythmSettings());
+        }
+        progressFrame = window.requestAnimationFrame(tick);
+      };
+
+      progressFrame = window.requestAnimationFrame(tick);
+    }
+
+    function updateProgressCursor(settings) {
+      const cursor = document.getElementById("progressCursor");
+      if (!cursor || !audioContext) {
+        return;
+      }
+
+      const secondsPerBeat = 60 / settings.bpm;
+      const cycleBeats = Math.max(1, currentExercise.length || settings.beats);
+      const cycleSeconds = cycleBeats * secondsPerBeat;
+      const elapsed = Math.max(0, audioContext.currentTime - exerciseCycleStart);
+      const cycleIndex = Math.floor(elapsed / cycleSeconds);
+      const cyclePosition = elapsed % cycleSeconds;
+      const progressBeats = cyclePosition / secondsPerBeat;
+      cursor.setAttribute("transform", `translate(${progressToX(progressBeats)} 0)`);
+
+      if (autoNextEnabled && cycleIndex > autoNextCycle && elapsed >= cycleSeconds) {
+        autoNextCycle = cycleIndex;
+        exerciseCycleStart = audioContext.currentTime;
+        nextRhythmQuestion(true);
+      }
+    }
+
+    function progressToX(progressBeats) {
+      const subWidth = 30;
+      const beatGap = 24;
+      const xStart = 86;
+      const beatWidth = subWidth * 4;
+      const clampedBeats = Math.max(0, Math.min(4, progressBeats));
+      const beatIndex = Math.min(3, Math.floor(clampedBeats));
+      const beatProgress = clampedBeats - beatIndex;
+      return xStart + beatIndex * (beatWidth + beatGap) + beatProgress * beatWidth - 12;
     }
 
     function ensureAudioContext() {
@@ -1300,6 +1371,15 @@
       renderRhythmStatus();
     }
 
+    function toggleAutoNext() {
+      autoNextEnabled = !autoNextEnabled;
+      autoNextCycle = -1;
+      if (audioContext) {
+        exerciseCycleStart = audioContext.currentTime;
+      }
+      renderRhythmStatus();
+    }
+
     function renderRhythmStatus() {
       const settings = getRhythmSettings();
       const selectedNote = getSelectedNote(settings);
@@ -1309,6 +1389,8 @@
       elements.currentPattern.textContent = currentExercise.length === 1 ? currentExercise[0].name : `${currentExercise.length} 拍`;
       elements.metronomeStatus.textContent = `${settings.bpm} BPM`;
       elements.toggleAnswer.classList.toggle("active", answerVisible);
+      elements.toggleAutoNext.classList.toggle("active", autoNextEnabled);
+      elements.toggleAutoNext.textContent = autoNextEnabled ? "自动中" : "自动下一题";
       elements.exerciseReadout.textContent = currentExercise.map((pattern, index) => `${index + 1}: ${pattern.name}`).join(" / ") || "随机十六分组合";
       elements.answerPanel.hidden = !answerVisible;
       elements.answerText.textContent = buildAnswerText(settings, selectedNote);
@@ -1336,7 +1418,8 @@
       const beatGap = 24;
       const xStart = 86;
       const beatWidth = subWidth * 4;
-      const width = xStart + currentExercise.length * beatWidth + Math.max(0, currentExercise.length - 1) * beatGap + 70;
+      const displayBeats = 4;
+      const width = xStart + displayBeats * beatWidth + (displayBeats - 1) * beatGap + 70;
       const height = 342;
       const tabLineIndex = settings.tabString - 1;
       const tabY = tabTop + tabLineIndex * tabGap;
@@ -1369,12 +1452,15 @@
 
       lines.push(`<text x="18" y="${tabTop + 35}" font-size="24" font-weight="800" fill="#202124">TAB</text>`);
 
-      currentExercise.forEach((pattern, beatIndex) => {
+      for (let beatIndex = 0; beatIndex < displayBeats; beatIndex += 1) {
+        const pattern = currentExercise[beatIndex];
         const x = xStart + beatIndex * (beatWidth + beatGap);
         lines.push(`<line x1="${x - 12}" y1="${staffTop}" x2="${x - 12}" y2="${staffTop + staffGap * 4}" stroke="#202124" stroke-width="1"/>`);
         lines.push(`<line x1="${x - 12}" y1="${tabTop}" x2="${x - 12}" y2="${tabTop + tabGap * 5}" stroke="#202124" stroke-width="1"/>`);
-        lines.push(`<text x="${x}" y="${height - 22}" font-size="12" fill="#6d6a62">${pattern.count}</text>`);
-      });
+        if (pattern) {
+          lines.push(`<text x="${x}" y="${height - 22}" font-size="12" fill="#6d6a62">${pattern.count}</text>`);
+        }
+      }
 
       lines.push(`<line x1="${width - 28}" y1="${staffTop}" x2="${width - 28}" y2="${staffTop + staffGap * 4}" stroke="#202124" stroke-width="2"/>`);
       lines.push(`<line x1="${width - 28}" y1="${tabTop}" x2="${width - 28}" y2="${tabTop + tabGap * 5}" stroke="#202124" stroke-width="2"/>`);
@@ -1414,8 +1500,13 @@
         drawBeam(lines, beam, tabTop - 26 + beam.level * 8);
       });
 
+      lines.push(`<g id="progressCursor" transform="translate(${progressToX(0)} 0)">`);
+      lines.push(`<line x1="0" y1="${staffTop - 18}" x2="0" y2="${tabTop + tabGap * 5 + 18}" stroke="#bd4b32" stroke-width="3" stroke-linecap="round"/>`);
+      lines.push(`<circle cx="0" cy="${staffTop - 24}" r="5" fill="#bd4b32"/>`);
+      lines.push(`</g>`);
       lines.push(`</svg>`);
       elements.notationMount.innerHTML = lines.join("");
+      updateProgressCursor(settings);
     }
 
     function buildRhythmEvents(settings, selectedNote) {
@@ -1554,6 +1645,10 @@
       elements.toggleAnswer.addEventListener("click", () => {
         ensureMetronomeRunning();
         toggleAnswer();
+      });
+      elements.toggleAutoNext.addEventListener("click", () => {
+        ensureMetronomeRunning();
+        toggleAutoNext();
       });
     }
 
