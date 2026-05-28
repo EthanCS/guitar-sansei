@@ -1275,11 +1275,12 @@
       }
 
       const secondsPerSixteenth = 60 / settings.bpm / 4;
+      const pickDirections = getPatternPickDirections(pattern);
       let cursor = 0;
       pattern.durations.forEach((duration, noteIndex) => {
         const time = audioContext.currentTime + cursor * secondsPerSixteenth;
         const noteDuration = duration * secondsPerSixteenth;
-        const pickDirection = getPickDirection(noteIndex);
+        const pickDirection = pickDirections[noteIndex];
         playGuitarNote(time, selectedNote, noteDuration, {
           isStrong: beatIndex === 0 && noteIndex === 0,
           pickDirection
@@ -1546,6 +1547,7 @@
 
       currentExercise.forEach((pattern, beatIndex) => {
         const beatX = xStart + beatIndex * (beatWidth + beatGap);
+        const pickDirections = getPatternPickDirections(pattern);
         let cursor = 0;
         pattern.durations.forEach((duration, noteIndex) => {
           events.push({
@@ -1555,7 +1557,7 @@
             beatIndex,
             onset: cursor,
             pulse: beatIndex * 4 + cursor,
-            pick: getPickDirection(noteIndex)
+            pick: pickDirections[noteIndex]
           });
           cursor += duration;
         });
@@ -1564,8 +1566,36 @@
       return events;
     }
 
-    function getPickDirection(noteIndex) {
-      return noteIndex % 2 === 0 ? "下" : "上";
+    function getPatternPickDirections(pattern) {
+      const directions = [];
+      let nextDirection = "下";
+      let cursor = 0;
+
+      pattern.durations.forEach((duration) => {
+        directions.push(nextDirection);
+        nextDirection = togglePickDirection(nextDirection);
+
+        const nextOnset = cursor + duration;
+        if (hasVirtualDownBetween(cursor, nextOnset)) {
+          nextDirection = "上";
+        }
+        cursor = nextOnset;
+      });
+
+      return directions;
+    }
+
+    function hasVirtualDownBetween(start, end) {
+      for (let subdivision = start + 1; subdivision < end; subdivision += 1) {
+        if (subdivision % 2 === 0) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    function togglePickDirection(direction) {
+      return direction === "下" ? "上" : "下";
     }
 
     function midiToStaffY(midi) {
