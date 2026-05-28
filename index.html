@@ -1275,12 +1275,11 @@
       }
 
       const secondsPerSixteenth = 60 / settings.bpm / 4;
-      const pickOffset = countNotesBeforeBeat(beatIndex);
       let cursor = 0;
       pattern.durations.forEach((duration, noteIndex) => {
         const time = audioContext.currentTime + cursor * secondsPerSixteenth;
         const noteDuration = duration * secondsPerSixteenth;
-        const pickDirection = getPickDirection(pickOffset + noteIndex);
+        const pickDirection = getPickDirection(noteIndex);
         playGuitarNote(time, selectedNote, noteDuration, {
           isStrong: beatIndex === 0 && noteIndex === 0,
           pickDirection
@@ -1547,7 +1546,6 @@
 
       currentExercise.forEach((pattern, beatIndex) => {
         const beatX = xStart + beatIndex * (beatWidth + beatGap);
-        const pickOffset = countNotesBeforeBeat(beatIndex);
         let cursor = 0;
         pattern.durations.forEach((duration, noteIndex) => {
           events.push({
@@ -1557,22 +1555,13 @@
             beatIndex,
             onset: cursor,
             pulse: beatIndex * 4 + cursor,
-            pick: getPickDirection(pickOffset + noteIndex)
+            pick: getPickDirection(noteIndex)
           });
           cursor += duration;
         });
       });
 
       return events;
-    }
-
-    function countNotesBeforeBeat(beatIndex) {
-      let count = 0;
-      for (let index = 0; index < beatIndex; index += 1) {
-        const pattern = currentExercise[index % currentExercise.length];
-        count += pattern ? pattern.durations.length : 0;
-      }
-      return count;
     }
 
     function getPickDirection(noteIndex) {
