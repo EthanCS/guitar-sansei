@@ -1568,34 +1568,23 @@
 
     function getPatternPickDirections(pattern) {
       const directions = [];
-      let nextDirection = "下";
+      const usesSixteenthGrid = pattern.durations.some((duration) => duration % 2 !== 0);
       let cursor = 0;
 
-      pattern.durations.forEach((duration) => {
-        directions.push(nextDirection);
-        nextDirection = togglePickDirection(nextDirection);
-
-        const nextOnset = cursor + duration;
-        if (hasVirtualDownBetween(cursor, nextOnset)) {
-          nextDirection = "上";
-        }
-        cursor = nextOnset;
+      pattern.durations.forEach((duration, noteIndex) => {
+        directions.push(usesSixteenthGrid ? getSixteenthGridPickDirection(cursor) : getAlternatingPickDirection(noteIndex));
+        cursor += duration;
       });
 
       return directions;
     }
 
-    function hasVirtualDownBetween(start, end) {
-      for (let subdivision = start + 1; subdivision < end; subdivision += 1) {
-        if (subdivision % 2 === 0) {
-          return true;
-        }
-      }
-      return false;
+    function getSixteenthGridPickDirection(onset) {
+      return onset % 2 === 0 ? "下" : "上";
     }
 
-    function togglePickDirection(direction) {
-      return direction === "下" ? "上" : "下";
+    function getAlternatingPickDirection(noteIndex) {
+      return noteIndex % 2 === 0 ? "下" : "上";
     }
 
     function midiToStaffY(midi) {
