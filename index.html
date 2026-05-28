@@ -851,6 +851,21 @@
           <input id="bpmInput" type="number" min="40" max="240" value="80" inputmode="numeric">
         </div>
         <div class="control">
+          <label for="metronomeVolume">节拍器音量</label>
+          <div class="range-pair">
+            <input id="metronomeVolume" type="range" min="0" max="100" value="70">
+            <input id="metronomeVolumeNumber" type="number" min="0" max="100" value="70" inputmode="numeric">
+          </div>
+        </div>
+        <div class="control">
+          <label for="metronomeSound">节拍器音色</label>
+          <select id="metronomeSound">
+            <option value="click" selected>点击</option>
+            <option value="wood">木鱼</option>
+            <option value="beep">电子</option>
+          </select>
+        </div>
+        <div class="control">
           <label>出题</label>
           <div class="button-row">
             <button id="startPractice" class="action-button" type="button">开始</button>
@@ -987,6 +1002,9 @@
     let activeMode = "scale";
     let practiceTimer = null;
     let practiceActive = false;
+    let countInActive = false;
+    let countInTimer = null;
+    let countInBeat = 0;
     let remainingSeconds = 60;
     let questionTotal = 0;
     let currentExercise = [];
@@ -1000,6 +1018,8 @@
     let autoNextEnabled = false;
     let autoNextCycle = -1;
     let committedBpm = 80;
+    let metronomeVolume = 0.7;
+    let metronomeSound = "click";
     let audioContext = null;
     let inputStream = null;
     let inputSource = null;
@@ -1056,6 +1076,9 @@
       tabString: document.getElementById("tabString"),
       tabFret: document.getElementById("tabFret"),
       bpmInput: document.getElementById("bpmInput"),
+      metronomeVolume: document.getElementById("metronomeVolume"),
+      metronomeVolumeNumber: document.getElementById("metronomeVolumeNumber"),
+      metronomeSound: document.getElementById("metronomeSound"),
       startPractice: document.getElementById("startPractice"),
       nextQuestion: document.getElementById("nextQuestion"),
       toggleAnswer: document.getElementById("toggleAnswer"),
@@ -1804,10 +1827,24 @@
       committedBpm = nextBpm;
       elements.bpmInput.value = String(nextBpm);
       const settings = getRhythmSettings();
-      if (metronomeActive) {
+      if (countInActive) {
+        startCountIn(settings);
+      } else if (metronomeActive) {
         restartRhythmPhase(settings);
       }
       renderRhythmStatus();
+    }
+
+    function syncMetronomeVolume(value) {
+      const nextValue = clampNumber(Number(value), 0, 100);
+      metronomeVolume = nextValue / 100;
+      elements.metronomeVolume.value = String(nextValue);
+      elements.metronomeVolumeNumber.value = String(nextValue);
+    }
+
+    function updateMetronomeSound(value) {
+      metronomeSound = ["click", "wood", "beep"].includes(value) ? value : "click";
+      elements.metronomeSound.value = metronomeSound;
     }
 
     function getSelectedString(settings) {
@@ -1849,8 +1886,8 @@
     }
 
     async function startPractice() {
-      ensureMetronomeRunning();
-      if (practiceActive) {
+      ensureAudioContext();
+      if (practiceActive || countInActive) {
         stopPractice();
         return;
       }
@@ -1863,9 +1900,65 @@
       remainingSeconds = settings.seconds;
       questionTotal = 0;
       resetJudgementStats();
+      startCountIn(settings);
+    }
+
+    function stopPractice() {
+      if (judgingActive && audioContext) {
+        markMissedJudgementEvents(audioContext.currentTime + judgementWindows.wrong - 0.001);
+      }
+      stopCountIn();
+      practiceActive = false;
+      judgingActive = false;
+      renderJudgementSummary();
+      elements.startPractice.textContent = "开始";
+      if (practiceTimer) {
+        window.clearInterval(practiceTimer);
+        practiceTimer = null;
+      }
+      renderRhythmStatus();
+    }
+
+    function startCountIn(settings = getRhythmSettings()) {
+      stopCountIn();
+      if (metronomeTimer) {
+        window.clearInterval(metronomeTimer);
+        metronomeTimer = null;
+      }
+
+      countInActive = true;
+      countInBeat = 0;
+      elements.startPractice.textContent = "停止";
+      elements.currentPattern.textContent = "预备";
+      elements.lastJudgement.textContent = "-";
+      elements.lastJudgement.className = "";
+      elements.judgementDetail.textContent = "预备：one two, one two three four";
+
+      playCountInBeat(settings);
+      const interval = 60000 / settings.bpm;
+      countInTimer = window.setInterval(() => {
+        countInBeat += 1;
+        if (countInBeat >= 6) {
+          finishCountIn(settings);
+          return;
+        }
+        playCountInBeat(settings);
+      }, interval);
+    }
+
+    function stopCountIn() {
+      if (countInTimer) {
+        window.clearInterval(countInTimer);
+        countInTimer = null;
+      }
+      countInActive = false;
+      countInBeat = 0;
+    }
+
+    function finishCountIn(settings) {
+      stopCountIn();
       practiceActive = true;
       judgingActive = Boolean(inputStream);
-      elements.startPractice.textContent = "停止";
       nextRhythmQuestion(true);
       renderRhythmStatus();
 
@@ -1879,19 +1972,13 @@
       }, 1000);
     }
 
-    function stopPractice() {
-      if (judgingActive && audioContext) {
-        markMissedJudgementEvents(audioContext.currentTime + judgementWindows.wrong - 0.001);
-      }
-      practiceActive = false;
-      judgingActive = false;
-      renderJudgementSummary();
-      elements.startPractice.textContent = "开始";
-      if (practiceTimer) {
-        window.clearInterval(practiceTimer);
-        practiceTimer = null;
-      }
-      renderRhythmStatus();
+    function playCountInBeat(settings) {
+      const words = ["one", "two", "one", "two", "three", "four"];
+      const isStrong = countInBeat === 0 || countInBeat === 2;
+      playMetronomeClick(audioContext.currentTime, isStrong);
+      speakCountInWord(words[countInBeat]);
+      elements.judgementDetail.textContent = `预备：${words.slice(0, countInBeat + 1).join(" ")}`;
+      elements.metronomeStatus.textContent = `${settings.bpm} BPM · 预备 ${countInBeat + 1}/6`;
     }
 
     function restartRhythmPhase(settings = getRhythmSettings()) {
@@ -1974,7 +2061,7 @@
       const progressBeats = cyclePosition / secondsPerBeat;
       cursor.setAttribute("transform", `translate(${progressToX(progressBeats)} 0)`);
 
-      if (autoNextEnabled && cycleIndex > autoNextCycle && elapsed >= cycleSeconds) {
+      if (!countInActive && autoNextEnabled && cycleIndex > autoNextCycle && elapsed >= cycleSeconds) {
         autoNextCycle = cycleIndex;
         nextRhythmQuestion(true);
       }
@@ -2050,26 +2137,66 @@
     }
 
     function playMetronomeClick(time, isStrong) {
+      if (metronomeVolume <= 0) {
+        return;
+      }
+
+      if (metronomeSound === "beep") {
+        playMetronomeBeep(time, isStrong);
+        return;
+      }
+
       const source = audioContext.createBufferSource();
       const gain = audioContext.createGain();
       const filter = audioContext.createBiquadFilter();
-      const duration = isStrong ? 0.034 : 0.026;
+      const isWood = metronomeSound === "wood";
+      const duration = isWood ? (isStrong ? 0.055 : 0.045) : (isStrong ? 0.034 : 0.026);
       const buffer = audioContext.createBuffer(1, Math.max(1, Math.floor(audioContext.sampleRate * duration)), audioContext.sampleRate);
       const data = buffer.getChannelData(0);
       for (let i = 0; i < data.length; i += 1) {
-        const decay = Math.pow(1 - i / data.length, 2.8);
-        data[i] = (Math.random() * 2 - 1) * decay;
+        const progress = i / data.length;
+        const decay = Math.pow(1 - progress, isWood ? 1.7 : 2.8);
+        const tone = Math.sin(progress * Math.PI * (isStrong ? 44 : 34));
+        const noise = Math.random() * 2 - 1;
+        data[i] = (isWood ? tone * 0.72 + noise * 0.28 : noise) * decay;
       }
       source.buffer = buffer;
-      filter.type = "highpass";
-      filter.frequency.setValueAtTime(isStrong ? 3600 : 4300, time);
-      filter.Q.setValueAtTime(0.8, time);
+      filter.type = isWood ? "bandpass" : "highpass";
+      filter.frequency.setValueAtTime(isWood ? (isStrong ? 1050 : 820) : (isStrong ? 3600 : 4300), time);
+      filter.Q.setValueAtTime(isWood ? 4.5 : 0.8, time);
       gain.gain.setValueAtTime(0.0001, time);
-      gain.gain.exponentialRampToValueAtTime(isStrong ? 0.34 : 0.18, time + 0.002);
+      gain.gain.exponentialRampToValueAtTime((isStrong ? 0.34 : 0.18) * metronomeVolume, time + 0.002);
       gain.gain.exponentialRampToValueAtTime(0.0001, time + duration);
       source.connect(filter).connect(gain).connect(audioContext.destination);
       source.start(time);
       source.stop(time + duration + 0.01);
+    }
+
+    function playMetronomeBeep(time, isStrong) {
+      const osc = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(isStrong ? 1240 : 880, time);
+      gain.gain.setValueAtTime(0.0001, time);
+      gain.gain.exponentialRampToValueAtTime((isStrong ? 0.22 : 0.13) * metronomeVolume, time + 0.004);
+      gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.08);
+      osc.connect(gain).connect(audioContext.destination);
+      osc.start(time);
+      osc.stop(time + 0.09);
+    }
+
+    function speakCountInWord(word) {
+      if (!word || !("speechSynthesis" in window)) {
+        return;
+      }
+
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(word);
+      utterance.lang = "en-US";
+      utterance.rate = 1.08;
+      utterance.pitch = 1;
+      utterance.volume = Math.min(1, Math.max(0.35, metronomeVolume));
+      window.speechSynthesis.speak(utterance);
     }
 
     function playGuitarNote(time, selectedNote, noteDuration, options) {
@@ -2168,8 +2295,8 @@
       const shownTime = practiceActive || remainingSeconds !== 0 ? remainingSeconds : settings.seconds;
       elements.timeLeft.textContent = `${shownTime}s`;
       elements.questionCount.textContent = String(questionTotal);
-      elements.currentPattern.textContent = currentExercise.length === 1 ? currentExercise[0].name : `${currentExercise.length} 拍`;
-      elements.metronomeStatus.textContent = `${settings.bpm} BPM`;
+      elements.currentPattern.textContent = countInActive ? "预备" : currentExercise.length === 1 ? currentExercise[0].name : `${currentExercise.length} 拍`;
+      elements.metronomeStatus.textContent = countInActive ? `${settings.bpm} BPM · 预备 ${countInBeat + 1}/6` : `${settings.bpm} BPM`;
       elements.toggleAnswer.classList.toggle("active", answerVisible);
       elements.toggleAutoNext.classList.toggle("active", autoNextEnabled);
       elements.toggleAutoNext.textContent = autoNextEnabled ? "自动中" : "自动下一题";
@@ -2457,6 +2584,9 @@
           elements.bpmInput.blur();
         }
       });
+      elements.metronomeVolume.addEventListener("input", (event) => syncMetronomeVolume(event.target.value));
+      elements.metronomeVolumeNumber.addEventListener("input", (event) => syncMetronomeVolume(event.target.value));
+      elements.metronomeSound.addEventListener("change", (event) => updateMetronomeSound(event.target.value));
       elements.startPractice.addEventListener("click", startPractice);
       elements.nextQuestion.addEventListener("click", () => nextRhythmQuestion(true));
       elements.toggleAnswer.addEventListener("click", () => {
