@@ -144,7 +144,7 @@
     }
 
     .rhythm-controls {
-      grid-template-columns: repeat(5, minmax(140px, 1fr));
+      grid-template-columns: repeat(4, minmax(150px, 1fr));
     }
 
     .control {
@@ -211,6 +211,11 @@
       border: 1px solid var(--line);
       background: #fff;
       color: var(--ink);
+    }
+
+    .action-button.active {
+      background: var(--accent);
+      color: #fff;
     }
 
     .fretboard-shell {
@@ -481,7 +486,7 @@
 
     .rhythm-status {
       display: grid;
-      grid-template-columns: repeat(3, minmax(160px, 1fr));
+      grid-template-columns: repeat(4, minmax(150px, 1fr));
       gap: 12px;
       margin-bottom: 16px;
     }
@@ -526,6 +531,27 @@
     .pattern-bank h3 {
       margin: 0 0 10px;
       font-size: 15px;
+    }
+
+    .answer-panel {
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+
+    .answer-panel[hidden] {
+      display: none;
+    }
+
+    .answer-panel h3 {
+      margin: 0 0 10px;
+      font-size: 15px;
+    }
+
+    .answer-text {
+      margin: 0;
+      color: var(--ink);
+      font-size: 15px;
+      line-height: 1.7;
     }
 
     @media (max-width: 1120px) {
@@ -699,10 +725,21 @@
           <input id="tabFret" type="number" min="0" max="24" value="0" inputmode="numeric">
         </div>
         <div class="control">
+          <label for="bpmInput">节拍器 BPM</label>
+          <input id="bpmInput" type="number" min="40" max="240" value="80" inputmode="numeric">
+        </div>
+        <div class="control">
           <label>出题</label>
           <div class="button-row">
             <button id="startPractice" class="action-button" type="button">开始</button>
             <button id="nextQuestion" class="action-button secondary" type="button">下一题</button>
+          </div>
+        </div>
+        <div class="control">
+          <label>节拍器</label>
+          <div class="button-row">
+            <button id="toggleMetronome" class="action-button secondary" type="button">开启</button>
+            <button id="toggleAnswer" class="action-button secondary" type="button">答案</button>
           </div>
         </div>
       </section>
@@ -720,6 +757,10 @@
           <span>当前组合</span>
           <strong id="currentPattern">-</strong>
         </div>
+        <div class="status-box">
+          <span>节拍器</span>
+          <strong id="metronomeStatus">关闭</strong>
+        </div>
       </section>
 
       <section class="panel notation-panel" aria-label="五线谱和吉他六线谱">
@@ -730,6 +771,11 @@
         <div class="notation-scroll">
           <div id="notationMount"></div>
         </div>
+      </section>
+
+      <section id="answerPanel" class="panel answer-panel" aria-label="弹奏答案" hidden>
+        <h3>答案</h3>
+        <p class="answer-text" id="answerText"></p>
       </section>
 
       <section class="panel pattern-bank" aria-label="十六分组合题库">
@@ -773,12 +819,12 @@
     };
 
     const strings = [
-      { number: 1, label: "E", pc: 4 },
-      { number: 2, label: "B", pc: 11 },
-      { number: 3, label: "G", pc: 7 },
-      { number: 4, label: "D", pc: 2 },
-      { number: 5, label: "A", pc: 9 },
-      { number: 6, label: "E", pc: 4 }
+      { number: 1, label: "E", pc: 4, midi: 64 },
+      { number: 2, label: "B", pc: 11, midi: 59 },
+      { number: 3, label: "G", pc: 7, midi: 55 },
+      { number: 4, label: "D", pc: 2, midi: 50 },
+      { number: 5, label: "A", pc: 9, midi: 45 },
+      { number: 6, label: "E", pc: 4, midi: 40 }
     ];
 
     const rhythmPatterns = [
@@ -799,6 +845,11 @@
     let remainingSeconds = 60;
     let questionTotal = 0;
     let currentExercise = [];
+    let answerVisible = false;
+    let metronomeActive = false;
+    let metronomeTimer = null;
+    let metronomeBeat = 0;
+    let audioContext = null;
 
     const elements = {
       currentLabel: document.getElementById("currentLabel"),
@@ -819,13 +870,19 @@
       exerciseBeats: document.getElementById("exerciseBeats"),
       tabString: document.getElementById("tabString"),
       tabFret: document.getElementById("tabFret"),
+      bpmInput: document.getElementById("bpmInput"),
       startPractice: document.getElementById("startPractice"),
       nextQuestion: document.getElementById("nextQuestion"),
+      toggleMetronome: document.getElementById("toggleMetronome"),
+      toggleAnswer: document.getElementById("toggleAnswer"),
       timeLeft: document.getElementById("timeLeft"),
       questionCount: document.getElementById("questionCount"),
       currentPattern: document.getElementById("currentPattern"),
+      metronomeStatus: document.getElementById("metronomeStatus"),
       exerciseReadout: document.getElementById("exerciseReadout"),
       notationMount: document.getElementById("notationMount"),
+      answerPanel: document.getElementById("answerPanel"),
+      answerText: document.getElementById("answerText"),
       patternBank: document.getElementById("patternBank")
     };
 
@@ -1030,7 +1087,26 @@
         seconds: clampNumber(Number(elements.practiceDuration.value), 30, 180),
         beats: clampNumber(Number(elements.exerciseBeats.value), 1, 4),
         tabString: clampNumber(Number(elements.tabString.value), 1, 6),
-        tabFret: clampNumber(Number(elements.tabFret.value), 0, 24)
+        tabFret: clampNumber(Number(elements.tabFret.value), 0, 24),
+        bpm: clampNumber(Number(elements.bpmInput.value), 40, 240)
+      };
+    }
+
+    function getSelectedString(settings) {
+      return strings.find((string) => string.number === settings.tabString) || strings[2];
+    }
+
+    function getSelectedNote(settings) {
+      const string = getSelectedString(settings);
+      const midi = string.midi + settings.tabFret;
+      const pc = midi % 12;
+      return {
+        string,
+        midi,
+        pc,
+        name: pitchNames[pc],
+        writtenMidi: midi + 12,
+        accidental: getAccidental(midi + 12)
       };
     }
 
@@ -1082,48 +1158,160 @@
       renderRhythmStatus();
     }
 
+    function toggleMetronome() {
+      if (metronomeActive) {
+        stopMetronome();
+      } else {
+        startMetronome();
+      }
+    }
+
+    function startMetronome() {
+      const settings = getRhythmSettings();
+      ensureAudioContext();
+      metronomeActive = true;
+      metronomeBeat = 0;
+      playMetronomeBeat(0);
+      scheduleAnswerPulse(0);
+      restartMetronomeTimer(settings.bpm);
+      renderRhythmStatus();
+    }
+
+    function stopMetronome() {
+      metronomeActive = false;
+      if (metronomeTimer) {
+        window.clearInterval(metronomeTimer);
+        metronomeTimer = null;
+      }
+      renderRhythmStatus();
+    }
+
+    function restartMetronomeTimer(bpm) {
+      if (metronomeTimer) {
+        window.clearInterval(metronomeTimer);
+      }
+      const interval = 60000 / bpm;
+      metronomeTimer = window.setInterval(() => {
+        metronomeBeat = (metronomeBeat + 1) % 4;
+        playMetronomeBeat(metronomeBeat);
+        scheduleAnswerPulse(metronomeBeat);
+      }, interval);
+    }
+
+    function ensureAudioContext() {
+      if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioContext.state === "suspended") {
+        audioContext.resume();
+      }
+    }
+
+    function playMetronomeBeat(beatIndex) {
+      const isStrong = beatIndex === 0;
+      playDa(audioContext.currentTime, {
+        frequency: isStrong ? 1040 : 780,
+        gain: isStrong ? 0.24 : 0.13,
+        duration: isStrong ? 0.085 : 0.065
+      });
+    }
+
+    function scheduleAnswerPulse(beatIndex) {
+      if (!answerVisible || !currentExercise.length || !audioContext) {
+        return;
+      }
+
+      const settings = getRhythmSettings();
+      const pattern = currentExercise[beatIndex % currentExercise.length];
+      if (!pattern) {
+        return;
+      }
+
+      const secondsPerSixteenth = 60 / settings.bpm / 4;
+      let cursor = 0;
+      pattern.durations.forEach((duration, noteIndex) => {
+        const time = audioContext.currentTime + cursor * secondsPerSixteenth;
+        playDa(time, {
+          frequency: noteIndex === 0 ? 1320 : 1180,
+          gain: beatIndex === 0 && noteIndex === 0 ? 0.22 : 0.14,
+          duration: 0.055
+        });
+        cursor += duration;
+      });
+    }
+
+    function playDa(time, options) {
+      const osc = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      const filter = audioContext.createBiquadFilter();
+      osc.type = "square";
+      osc.frequency.setValueAtTime(options.frequency, time);
+      filter.type = "bandpass";
+      filter.frequency.setValueAtTime(options.frequency, time);
+      filter.Q.setValueAtTime(6, time);
+      gain.gain.setValueAtTime(0.0001, time);
+      gain.gain.exponentialRampToValueAtTime(options.gain, time + 0.006);
+      gain.gain.exponentialRampToValueAtTime(0.0001, time + options.duration);
+      osc.connect(filter).connect(gain).connect(audioContext.destination);
+      osc.start(time);
+      osc.stop(time + options.duration + 0.02);
+    }
+
+    function toggleAnswer() {
+      answerVisible = !answerVisible;
+      renderRhythmNotation(getRhythmSettings());
+      renderRhythmStatus();
+    }
+
     function renderRhythmStatus() {
       const settings = getRhythmSettings();
+      const selectedNote = getSelectedNote(settings);
       const shownTime = practiceActive || remainingSeconds !== 0 ? remainingSeconds : settings.seconds;
       elements.timeLeft.textContent = `${shownTime}s`;
       elements.questionCount.textContent = String(questionTotal);
       elements.currentPattern.textContent = currentExercise.length === 1 ? currentExercise[0].name : `${currentExercise.length} 拍`;
+      elements.metronomeStatus.textContent = metronomeActive ? `${settings.bpm} BPM` : "关闭";
+      elements.toggleMetronome.textContent = metronomeActive ? "关闭" : "开启";
+      elements.toggleMetronome.classList.toggle("active", metronomeActive);
+      elements.toggleAnswer.classList.toggle("active", answerVisible);
       elements.exerciseReadout.textContent = currentExercise.map((pattern, index) => `${index + 1}: ${pattern.name}`).join(" / ") || "随机十六分组合";
+      elements.answerPanel.hidden = !answerVisible;
+      elements.answerText.textContent = buildAnswerText(settings, selectedNote);
+    }
+
+    function buildAnswerText(settings, selectedNote) {
+      if (!currentExercise.length) {
+        return "先生成一道题。";
+      }
+
+      const parts = currentExercise.map((pattern, index) => {
+        return `第 ${index + 1} 拍：按 ${pattern.count} 弹 ${pattern.name}`;
+      });
+      return `用 ${selectedNote.string.number}弦 ${settings.tabFret} 品（${selectedNote.name}，吉他谱实际音高，五线谱按吉他记谱高八度显示）弹。${parts.join("；")}。节拍器强拍为第 1 拍，其他拍为弱拍；答案声音会在每个需要拨弦的位置发“哒”。`;
     }
 
     function renderRhythmNotation(settings) {
-      const staffTop = 30;
+      const selectedNote = getSelectedNote(settings);
+      const events = buildRhythmEvents(settings, selectedNote);
+      const staffTop = 112;
       const staffGap = 10;
-      const tabTop = 126;
+      const tabTop = 230;
       const tabGap = 10;
-      const noteY = staffTop + staffGap * 3;
       const subWidth = 30;
       const beatGap = 24;
       const xStart = 86;
       const beatWidth = subWidth * 4;
       const width = xStart + currentExercise.length * beatWidth + Math.max(0, currentExercise.length - 1) * beatGap + 70;
-      const height = 228;
+      const height = 342;
       const tabLineIndex = settings.tabString - 1;
       const tabY = tabTop + tabLineIndex * tabGap;
-      const notes = [];
       const beams = [];
+      const tabBeams = [];
 
       currentExercise.forEach((pattern, beatIndex) => {
-        const beatX = xStart + beatIndex * (beatWidth + beatGap);
-        let cursor = 0;
-        const beatNotes = pattern.durations.map((duration) => {
-          const note = {
-            x: beatX + cursor * subWidth,
-            y: noteY,
-            duration,
-            beatIndex,
-            onset: cursor
-          };
-          cursor += duration;
-          notes.push(note);
-          return note;
-        });
+        const beatNotes = events.filter((event) => event.beatIndex === beatIndex);
         beams.push(...buildBeamSegments(beatNotes));
+        tabBeams.push(...buildBeamSegments(beatNotes));
       });
 
       const lines = [];
@@ -1156,13 +1344,17 @@
       lines.push(`<line x1="${width - 28}" y1="${staffTop}" x2="${width - 28}" y2="${staffTop + staffGap * 4}" stroke="#202124" stroke-width="2"/>`);
       lines.push(`<line x1="${width - 28}" y1="${tabTop}" x2="${width - 28}" y2="${tabTop + tabGap * 5}" stroke="#202124" stroke-width="2"/>`);
 
-      notes.forEach((note) => {
+      events.forEach((note) => {
         const stemX = note.x + 7;
-        const stemTop = note.y - 38;
-        lines.push(`<ellipse cx="${note.x}" cy="${note.y}" rx="7.2" ry="5.1" transform="rotate(-20 ${note.x} ${note.y})" fill="#202124"/>`);
-        lines.push(`<line x1="${stemX}" y1="${note.y}" x2="${stemX}" y2="${stemTop}" stroke="#202124" stroke-width="1.7"/>`);
+        const stemTop = note.staffY - 38;
+        drawLedgerLines(lines, note.x, note.staffY, staffTop, staffTop + staffGap * 4, staffGap);
+        if (selectedNote.accidental) {
+          lines.push(`<text x="${note.x - 20}" y="${note.staffY + 5}" font-size="18" font-weight="760" fill="#202124">${selectedNote.accidental}</text>`);
+        }
+        lines.push(`<ellipse cx="${note.x}" cy="${note.staffY}" rx="7.2" ry="5.1" transform="rotate(-20 ${note.x} ${note.staffY})" fill="#202124"/>`);
+        lines.push(`<line x1="${stemX}" y1="${note.staffY}" x2="${stemX}" y2="${stemTop}" stroke="#202124" stroke-width="1.7"/>`);
         if (note.duration === 3) {
-          lines.push(`<circle cx="${note.x + 14}" cy="${note.y - 1}" r="1.8" fill="#202124"/>`);
+          lines.push(`<circle cx="${note.x + 14}" cy="${note.staffY - 1}" r="1.8" fill="#202124"/>`);
         }
         if (note.duration < 4 && !beams.some((beam) => beam.notes.includes(note))) {
           const hook = note.duration === 1 ? 16 : 12;
@@ -1173,24 +1365,92 @@
         }
         lines.push(`<rect x="${note.x - 9}" y="${tabY - 7}" width="18" height="14" fill="#fffdf9"/>`);
         lines.push(`<text x="${note.x}" y="${tabY + 5}" text-anchor="middle" font-size="14" font-weight="760" fill="#202124">${settings.tabFret}</text>`);
+        lines.push(`<line x1="${stemX}" y1="${tabY + 8}" x2="${stemX}" y2="${tabTop - 26}" stroke="#202124" stroke-width="1.7"/>`);
+        if (note.duration === 3) {
+          lines.push(`<circle cx="${note.x + 14}" cy="${tabY + 1}" r="1.8" fill="#202124"/>`);
+        }
       });
 
       beams.forEach((beam) => {
-        const first = beam.notes[0];
-        const last = beam.notes[beam.notes.length - 1];
-        const x1 = first.x + 7;
-        const x2 = last.x + 7;
-        const y = noteY - 38 + beam.level * 8;
-        if (x1 === x2) {
-          const direction = first.onset >= 2 ? -1 : 1;
-          lines.push(`<rect x="${direction > 0 ? x1 : x1 - 14}" y="${y}" width="14" height="4.5" fill="#202124"/>`);
-        } else {
-          lines.push(`<rect x="${x1}" y="${y}" width="${x2 - x1}" height="4.5" fill="#202124"/>`);
-        }
+        drawBeam(lines, beam, beam.notes[0].staffY - 38 + beam.level * 8);
+      });
+
+      tabBeams.forEach((beam) => {
+        drawBeam(lines, beam, tabTop - 26 + beam.level * 8);
       });
 
       lines.push(`</svg>`);
       elements.notationMount.innerHTML = lines.join("");
+    }
+
+    function buildRhythmEvents(settings, selectedNote) {
+      const subWidth = 30;
+      const beatGap = 24;
+      const xStart = 86;
+      const beatWidth = subWidth * 4;
+      const staffY = midiToStaffY(selectedNote.writtenMidi);
+      const events = [];
+
+      currentExercise.forEach((pattern, beatIndex) => {
+        const beatX = xStart + beatIndex * (beatWidth + beatGap);
+        let cursor = 0;
+        pattern.durations.forEach((duration) => {
+          events.push({
+            x: beatX + cursor * subWidth,
+            staffY,
+            duration,
+            beatIndex,
+            onset: cursor,
+            pulse: beatIndex * 4 + cursor
+          });
+          cursor += duration;
+        });
+      });
+
+      return events;
+    }
+
+    function midiToStaffY(midi) {
+      const staffTop = 112;
+      const staffGap = 10;
+      const bottomLineY = staffTop + staffGap * 4;
+      const bottomLineStep = diatonicStep(64);
+      const noteStep = diatonicStep(midi);
+      return bottomLineY - (noteStep - bottomLineStep) * (staffGap / 2);
+    }
+
+    function diatonicStep(midi) {
+      const pcToStep = [0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6];
+      const pc = ((midi % 12) + 12) % 12;
+      const octave = Math.floor(midi / 12) - 1;
+      return octave * 7 + pcToStep[pc];
+    }
+
+    function getAccidental(midi) {
+      const pc = ((midi % 12) + 12) % 12;
+      return [1, 3, 6, 8, 10].includes(pc) ? "#" : "";
+    }
+
+    function drawLedgerLines(lines, x, y, top, bottom, gap) {
+      for (let ledgerY = bottom + gap; ledgerY <= y + 0.1; ledgerY += gap) {
+        lines.push(`<line x1="${x - 14}" y1="${ledgerY}" x2="${x + 14}" y2="${ledgerY}" stroke="#202124" stroke-width="1"/>`);
+      }
+      for (let ledgerY = top - gap; ledgerY >= y - 0.1; ledgerY -= gap) {
+        lines.push(`<line x1="${x - 14}" y1="${ledgerY}" x2="${x + 14}" y2="${ledgerY}" stroke="#202124" stroke-width="1"/>`);
+      }
+    }
+
+    function drawBeam(lines, beam, y) {
+      const first = beam.notes[0];
+      const last = beam.notes[beam.notes.length - 1];
+      const x1 = first.x + 7;
+      const x2 = last.x + 7;
+      if (x1 === x2) {
+        const direction = first.onset >= 2 ? -1 : 1;
+        lines.push(`<rect x="${direction > 0 ? x1 : x1 - 14}" y="${y}" width="14" height="4.5" fill="#202124"/>`);
+      } else {
+        lines.push(`<rect x="${x1}" y="${y}" width="${x2 - x1}" height="4.5" fill="#202124"/>`);
+      }
     }
 
     function buildBeamSegments(beatNotes) {
@@ -1232,14 +1492,28 @@
         renderRhythmStatus();
       });
       elements.exerciseBeats.addEventListener("change", () => nextRhythmQuestion(false));
-      elements.tabString.addEventListener("change", () => renderRhythmNotation(getRhythmSettings()));
+      elements.tabString.addEventListener("change", () => {
+        renderRhythmNotation(getRhythmSettings());
+        renderRhythmStatus();
+      });
       elements.tabFret.addEventListener("input", () => {
         const settings = getRhythmSettings();
         elements.tabFret.value = String(settings.tabFret);
         renderRhythmNotation(settings);
+        renderRhythmStatus();
+      });
+      elements.bpmInput.addEventListener("input", () => {
+        const settings = getRhythmSettings();
+        elements.bpmInput.value = String(settings.bpm);
+        if (metronomeActive) {
+          restartMetronomeTimer(settings.bpm);
+        }
+        renderRhythmStatus();
       });
       elements.startPractice.addEventListener("click", startPractice);
       elements.nextQuestion.addEventListener("click", () => nextRhythmQuestion(true));
+      elements.toggleMetronome.addEventListener("click", toggleMetronome);
+      elements.toggleAnswer.addEventListener("click", toggleAnswer);
     }
 
     initControls();
