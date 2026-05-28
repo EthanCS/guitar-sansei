@@ -135,6 +135,83 @@
       display: none;
     }
 
+    .audio-panel {
+      display: grid;
+      grid-template-columns: minmax(220px, 320px) 128px 150px minmax(300px, 1fr);
+      gap: 12px;
+      align-items: end;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+
+    .audio-status {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-height: 42px;
+      padding: 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      min-width: 0;
+    }
+
+    .audio-led {
+      width: 12px;
+      height: 12px;
+      flex: 0 0 auto;
+      border-radius: 999px;
+      background: #9a968e;
+      box-shadow: 0 0 0 4px rgba(154, 150, 142, 0.14);
+    }
+
+    .audio-status[data-state="waiting"] .audio-led {
+      background: #d39b25;
+      box-shadow: 0 0 0 4px rgba(211, 155, 37, 0.16);
+    }
+
+    .audio-status[data-state="active"] .audio-led {
+      background: #2f9e61;
+      box-shadow: 0 0 0 4px rgba(47, 158, 97, 0.18);
+    }
+
+    .audio-status[data-state="clip"] .audio-led,
+    .audio-status[data-state="error"] .audio-led {
+      background: #bd4b32;
+      box-shadow: 0 0 0 4px rgba(189, 75, 50, 0.16);
+    }
+
+    .audio-status-text {
+      display: grid;
+      gap: 1px;
+      min-width: 0;
+    }
+
+    .audio-status-text strong {
+      font-size: 13px;
+      line-height: 1.2;
+    }
+
+    .audio-status-text span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.2;
+    }
+
+    .waveform-shell {
+      height: 74px;
+      border: 1px solid #25272b;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #121417;
+    }
+
+    .waveform {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
     .controls {
       display: grid;
       grid-template-columns: repeat(4, minmax(160px, 1fr));
@@ -555,8 +632,13 @@
 
       .controls,
       .summary-grid,
-      .rhythm-status {
+      .rhythm-status,
+      .audio-panel {
         grid-template-columns: 1fr 1fr;
+      }
+
+      .waveform-shell {
+        grid-column: 1 / -1;
       }
     }
 
@@ -576,8 +658,13 @@
       .controls,
       .summary-grid,
       .rhythm-controls,
-      .rhythm-status {
+      .rhythm-status,
+      .audio-panel {
         grid-template-columns: 1fr;
+      }
+
+      .waveform-shell {
+        grid-column: auto;
       }
 
       .section-header {
@@ -605,6 +692,29 @@
         <strong id="currentValue">C Ionian</strong>
       </div>
     </header>
+
+    <section class="panel audio-panel" aria-label="音源输入">
+      <div class="control">
+        <label for="audioInputSelect">音源输入</label>
+        <select id="audioInputSelect">
+          <option value="">默认输入</option>
+        </select>
+      </div>
+      <div class="control">
+        <label>输入检测</label>
+        <button id="toggleAudioInput" class="action-button secondary" type="button">开启</button>
+      </div>
+      <div class="audio-status" id="audioInputStatus" data-state="idle" aria-live="polite">
+        <span class="audio-led" aria-hidden="true"></span>
+        <span class="audio-status-text">
+          <strong id="audioStatusTitle">未开启</strong>
+          <span id="audioStatusDetail">选择麦克风或声卡输入</span>
+        </span>
+      </div>
+      <div class="waveform-shell" aria-label="输入波形">
+        <canvas id="waveformCanvas" class="waveform" width="640" height="148"></canvas>
+      </div>
+    </section>
 
     <nav class="mode-tabs" aria-label="练习模式">
       <button class="mode-tab active" type="button" data-mode="scale" aria-pressed="true">调式指板</button>
@@ -830,11 +940,23 @@
     let autoNextCycle = -1;
     let committedBpm = 80;
     let audioContext = null;
+    let inputStream = null;
+    let inputSource = null;
+    let inputAnalyser = null;
+    let waveformFrame = null;
+    let waveformData = null;
+    let inputLevel = 0;
 
     const elements = {
       currentLabel: document.getElementById("currentLabel"),
       currentValue: document.getElementById("currentValue"),
       modeTabs: Array.from(document.querySelectorAll(".mode-tab")),
+      audioInputSelect: document.getElementById("audioInputSelect"),
+      toggleAudioInput: document.getElementById("toggleAudioInput"),
+      audioInputStatus: document.getElementById("audioInputStatus"),
+      audioStatusTitle: document.getElementById("audioStatusTitle"),
+      audioStatusDetail: document.getElementById("audioStatusDetail"),
+      waveformCanvas: document.getElementById("waveformCanvas"),
       scaleMode: document.getElementById("scaleMode"),
       rhythmMode: document.getElementById("rhythmMode"),
       rootSelect: document.getElementById("rootSelect"),
@@ -887,6 +1009,226 @@
         fragment.append(chip);
       });
       elements.patternBank.replaceChildren(fragment);
+      drawEmptyWaveform();
+      refreshAudioInputDevices();
+    }
+
+    async function refreshAudioInputDevices() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+        updateAudioInputStatus("error", "不支持", "当前浏览器不支持音频输入");
+        return;
+      }
+
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const audioInputs = devices.filter((device) => device.kind === "audioinput");
+        const selectedValue = elements.audioInputSelect.value;
+        const fragment = document.createDocumentFragment();
+        const defaultOption = document.createElement("option");
+        defaultOption.value = "";
+        defaultOption.textContent = "默认输入";
+        fragment.append(defaultOption);
+
+        audioInputs.forEach((device, index) => {
+          const option = document.createElement("option");
+          option.value = device.deviceId;
+          option.textContent = device.label || `输入设备 ${index + 1}`;
+          fragment.append(option);
+        });
+
+        elements.audioInputSelect.replaceChildren(fragment);
+        if (selectedValue && audioInputs.some((device) => device.deviceId === selectedValue)) {
+          elements.audioInputSelect.value = selectedValue;
+        }
+      } catch (error) {
+        updateAudioInputStatus("error", "读取失败", "无法读取输入设备");
+      }
+    }
+
+    async function startAudioInput() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        updateAudioInputStatus("error", "不支持", "当前浏览器不支持音频输入");
+        return;
+      }
+
+      stopAudioInput();
+      updateAudioInputStatus("waiting", "请求权限", "等待浏览器授权");
+
+      const deviceId = elements.audioInputSelect.value;
+      const constraints = {
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          ...(deviceId ? { deviceId: { exact: deviceId } } : {})
+        }
+      };
+
+      try {
+        ensureAudioContext();
+        inputStream = await navigator.mediaDevices.getUserMedia(constraints);
+        inputSource = audioContext.createMediaStreamSource(inputStream);
+        inputAnalyser = audioContext.createAnalyser();
+        inputAnalyser.fftSize = 2048;
+        inputAnalyser.smoothingTimeConstant = 0.72;
+        waveformData = new Uint8Array(inputAnalyser.fftSize);
+        inputSource.connect(inputAnalyser);
+        elements.toggleAudioInput.textContent = "关闭";
+        elements.toggleAudioInput.classList.add("active");
+        updateAudioInputStatus("waiting", "已连接", "等待输入信号");
+        await refreshAudioInputDevices();
+        const track = inputStream.getAudioTracks()[0];
+        if (track && track.getSettings().deviceId) {
+          elements.audioInputSelect.value = track.getSettings().deviceId;
+        }
+        startWaveformLoop();
+      } catch (error) {
+        stopAudioInput();
+        updateAudioInputStatus("error", "未连接", getAudioInputErrorText(error));
+      }
+    }
+
+    function stopAudioInput() {
+      if (waveformFrame) {
+        window.cancelAnimationFrame(waveformFrame);
+        waveformFrame = null;
+      }
+
+      if (inputSource) {
+        inputSource.disconnect();
+        inputSource = null;
+      }
+
+      if (inputStream) {
+        inputStream.getTracks().forEach((track) => track.stop());
+        inputStream = null;
+      }
+
+      inputAnalyser = null;
+      waveformData = null;
+      inputLevel = 0;
+      elements.toggleAudioInput.textContent = "开启";
+      elements.toggleAudioInput.classList.remove("active");
+      updateAudioInputStatus("idle", "未开启", "选择麦克风或声卡输入");
+      drawEmptyWaveform();
+    }
+
+    function startWaveformLoop() {
+      if (waveformFrame) {
+        return;
+      }
+
+      const draw = () => {
+        updateWaveform();
+        waveformFrame = window.requestAnimationFrame(draw);
+      };
+
+      waveformFrame = window.requestAnimationFrame(draw);
+    }
+
+    function updateWaveform() {
+      if (!inputAnalyser || !waveformData) {
+        drawEmptyWaveform();
+        return;
+      }
+
+      inputAnalyser.getByteTimeDomainData(waveformData);
+      const canvas = elements.waveformCanvas;
+      const context = canvas.getContext("2d");
+      const width = canvas.width;
+      const height = canvas.height;
+      let sumSquares = 0;
+      let peak = 0;
+
+      context.clearRect(0, 0, width, height);
+      context.fillStyle = "#121417";
+      context.fillRect(0, 0, width, height);
+      drawWaveformGrid(context, width, height);
+
+      context.beginPath();
+      for (let i = 0; i < waveformData.length; i += 1) {
+        const normalized = (waveformData[i] - 128) / 128;
+        const x = (i / (waveformData.length - 1)) * width;
+        const y = height / 2 + normalized * height * 0.42;
+        sumSquares += normalized * normalized;
+        peak = Math.max(peak, Math.abs(normalized));
+        if (i === 0) {
+          context.moveTo(x, y);
+        } else {
+          context.lineTo(x, y);
+        }
+      }
+      context.strokeStyle = peak > 0.9 ? "#ff7058" : "#69d49a";
+      context.lineWidth = 2.4;
+      context.stroke();
+
+      inputLevel = Math.sqrt(sumSquares / waveformData.length);
+      updateInputSignalStatus(inputLevel, peak);
+    }
+
+    function drawEmptyWaveform() {
+      const canvas = elements.waveformCanvas;
+      const context = canvas.getContext("2d");
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.fillStyle = "#121417";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      drawWaveformGrid(context, canvas.width, canvas.height);
+      context.beginPath();
+      context.moveTo(0, canvas.height / 2);
+      context.lineTo(canvas.width, canvas.height / 2);
+      context.strokeStyle = "#5c626b";
+      context.lineWidth = 2;
+      context.stroke();
+    }
+
+    function drawWaveformGrid(context, width, height) {
+      context.strokeStyle = "rgba(255, 255, 255, 0.08)";
+      context.lineWidth = 1;
+      for (let x = 0; x <= width; x += width / 8) {
+        context.beginPath();
+        context.moveTo(x, 0);
+        context.lineTo(x, height);
+        context.stroke();
+      }
+      for (let y = height / 4; y <= height; y += height / 4) {
+        context.beginPath();
+        context.moveTo(0, y);
+        context.lineTo(width, y);
+        context.stroke();
+      }
+    }
+
+    function updateInputSignalStatus(level, peak) {
+      if (!inputStream) {
+        return;
+      }
+
+      if (peak > 0.96) {
+        updateAudioInputStatus("clip", "输入过载", `峰值 ${(peak * 100).toFixed(0)}%`);
+      } else if (level > 0.012) {
+        updateAudioInputStatus("active", "输入正常", `电平 ${(level * 100).toFixed(1)}%`);
+      } else {
+        updateAudioInputStatus("waiting", "已连接", "等待输入信号");
+      }
+    }
+
+    function updateAudioInputStatus(state, title, detail) {
+      elements.audioInputStatus.dataset.state = state;
+      elements.audioStatusTitle.textContent = title;
+      elements.audioStatusDetail.textContent = detail;
+    }
+
+    function getAudioInputErrorText(error) {
+      if (error && error.name === "NotAllowedError") {
+        return "浏览器拒绝了输入权限";
+      }
+      if (error && error.name === "NotFoundError") {
+        return "没有找到输入设备";
+      }
+      if (error && error.name === "OverconstrainedError") {
+        return "所选输入设备不可用";
+      }
+      return "无法开启音源输入";
     }
 
     function clampNumber(value, min, max) {
@@ -1654,6 +1996,21 @@
     }
 
     function bindEvents() {
+      elements.toggleAudioInput.addEventListener("click", () => {
+        if (inputStream) {
+          stopAudioInput();
+        } else {
+          startAudioInput();
+        }
+      });
+      elements.audioInputSelect.addEventListener("change", () => {
+        if (inputStream) {
+          startAudioInput();
+        }
+      });
+      if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+        navigator.mediaDevices.addEventListener("devicechange", refreshAudioInputDevices);
+      }
       elements.modeTabs.forEach((tab) => {
         tab.addEventListener("click", () => switchMode(tab.dataset.mode));
       });
