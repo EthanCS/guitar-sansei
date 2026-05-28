@@ -533,27 +533,6 @@
       font-size: 15px;
     }
 
-    .answer-panel {
-      padding: 16px;
-      margin-bottom: 16px;
-    }
-
-    .answer-panel[hidden] {
-      display: none;
-    }
-
-    .answer-panel h3 {
-      margin: 0 0 10px;
-      font-size: 15px;
-    }
-
-    .answer-text {
-      margin: 0;
-      color: var(--ink);
-      font-size: 15px;
-      line-height: 1.7;
-    }
-
     @media (max-width: 1120px) {
       .rhythm-controls {
         grid-template-columns: repeat(3, minmax(160px, 1fr));
@@ -773,11 +752,6 @@
         </div>
       </section>
 
-      <section id="answerPanel" class="panel answer-panel" aria-label="弹奏答案" hidden>
-        <h3>答案</h3>
-        <p class="answer-text" id="answerText"></p>
-      </section>
-
       <section class="panel pattern-bank" aria-label="十六分组合题库">
         <h3>组合题库</h3>
         <div class="chips" id="patternBank"></div>
@@ -887,8 +861,6 @@
       metronomeStatus: document.getElementById("metronomeStatus"),
       exerciseReadout: document.getElementById("exerciseReadout"),
       notationMount: document.getElementById("notationMount"),
-      answerPanel: document.getElementById("answerPanel"),
-      answerText: document.getElementById("answerText"),
       patternBank: document.getElementById("patternBank")
     };
 
@@ -1296,16 +1268,23 @@
       }
 
       const settings = getRhythmSettings();
+      const selectedNote = getSelectedNote(settings);
       const pattern = currentExercise[beatIndex % currentExercise.length];
       if (!pattern) {
         return;
       }
 
       const secondsPerSixteenth = 60 / settings.bpm / 4;
+      const pickOffset = countNotesBeforeBeat(beatIndex);
       let cursor = 0;
       pattern.durations.forEach((duration, noteIndex) => {
         const time = audioContext.currentTime + cursor * secondsPerSixteenth;
-        playAnswerDa(time, beatIndex === 0 && noteIndex === 0);
+        const noteDuration = duration * secondsPerSixteenth;
+        const pickDirection = getPickDirection(pickOffset + noteIndex);
+        playGuitarNote(time, selectedNote, noteDuration, {
+          isStrong: beatIndex === 0 && noteIndex === 0,
+          pickDirection
+        });
         cursor += duration;
       });
     }
@@ -1350,41 +1329,80 @@
       source.stop(time + duration + 0.01);
     }
 
-    function playAnswerDa(time, isStrong) {
-      const consonant = audioContext.createBufferSource();
-      const consonantGain = audioContext.createGain();
-      const consonantFilter = audioContext.createBiquadFilter();
-      const buffer = audioContext.createBuffer(1, Math.max(1, Math.floor(audioContext.sampleRate * 0.024)), audioContext.sampleRate);
+    function playGuitarNote(time, selectedNote, noteDuration, options) {
+      const frequency = 440 * Math.pow(2, (selectedNote.midi - 69) / 12);
+      const stringProfile = getStringProfile(selectedNote.string.number);
+      const noteGain = (options.isStrong ? 0.19 : 0.14) * stringProfile.gain;
+      const naturalDecay = Math.min(2.6, Math.max(0.48, noteDuration * 1.7));
+      const releaseStart = time + Math.max(0.045, noteDuration * 0.92);
+      const stopTime = time + naturalDecay + 0.25;
+      const output = audioContext.createGain();
+      const filter = audioContext.createBiquadFilter();
+      const brightness = options.pickDirection === "下" ? 1.08 : 0.92;
+
+      filter.type = "lowpass";
+      filter.frequency.setValueAtTime(stringProfile.filter * brightness, time);
+      filter.frequency.exponentialRampToValueAtTime(stringProfile.filter * 0.45, stopTime);
+      filter.Q.setValueAtTime(0.9, time);
+
+      output.gain.setValueAtTime(0.0001, time);
+      output.gain.exponentialRampToValueAtTime(noteGain, time + 0.006);
+      output.gain.exponentialRampToValueAtTime(noteGain * 0.5, releaseStart);
+      output.gain.exponentialRampToValueAtTime(0.0001, stopTime);
+      output.connect(filter).connect(audioContext.destination);
+
+      const partials = [
+        { ratio: 1, gain: 1 },
+        { ratio: 2, gain: 0.34 },
+        { ratio: 3, gain: 0.16 },
+        { ratio: 4, gain: 0.08 }
+      ];
+
+      partials.forEach((partial) => {
+        const osc = audioContext.createOscillator();
+        const partialGain = audioContext.createGain();
+        const detune = (Math.random() * 2 - 1) * 2.5;
+        osc.type = partial.ratio === 1 ? "triangle" : "sine";
+        osc.frequency.setValueAtTime(frequency * partial.ratio, time);
+        osc.detune.setValueAtTime(detune, time);
+        partialGain.gain.setValueAtTime(partial.gain, time);
+        osc.connect(partialGain).connect(output);
+        osc.start(time);
+        osc.stop(stopTime + 0.02);
+      });
+
+      const pickNoise = audioContext.createBufferSource();
+      const pickGain = audioContext.createGain();
+      const pickFilter = audioContext.createBiquadFilter();
+      const pickDuration = 0.018;
+      const buffer = audioContext.createBuffer(1, Math.max(1, Math.floor(audioContext.sampleRate * pickDuration)), audioContext.sampleRate);
       const data = buffer.getChannelData(0);
       for (let i = 0; i < data.length; i += 1) {
-        data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+        const envelope = Math.pow(1 - i / data.length, 3.2);
+        data[i] = (Math.random() * 2 - 1) * envelope;
       }
-      consonant.buffer = buffer;
-      consonantFilter.type = "bandpass";
-      consonantFilter.frequency.setValueAtTime(isStrong ? 2600 : 2200, time);
-      consonantFilter.Q.setValueAtTime(3.4, time);
-      consonantGain.gain.setValueAtTime(0.0001, time);
-      consonantGain.gain.exponentialRampToValueAtTime(isStrong ? 0.24 : 0.15, time + 0.004);
-      consonantGain.gain.exponentialRampToValueAtTime(0.0001, time + 0.026);
-      consonant.connect(consonantFilter).connect(consonantGain).connect(audioContext.destination);
-      consonant.start(time);
-      consonant.stop(time + 0.032);
+      pickNoise.buffer = buffer;
+      pickFilter.type = "bandpass";
+      pickFilter.frequency.setValueAtTime(stringProfile.pick * brightness, time);
+      pickFilter.Q.setValueAtTime(2.6, time);
+      pickGain.gain.setValueAtTime(0.0001, time);
+      pickGain.gain.exponentialRampToValueAtTime((options.isStrong ? 0.075 : 0.05) * stringProfile.gain, time + 0.002);
+      pickGain.gain.exponentialRampToValueAtTime(0.0001, time + pickDuration);
+      pickNoise.connect(pickFilter).connect(pickGain).connect(audioContext.destination);
+      pickNoise.start(time);
+      pickNoise.stop(time + pickDuration + 0.01);
+    }
 
-      const vowel = audioContext.createOscillator();
-      const vowelGain = audioContext.createGain();
-      const vowelFilter = audioContext.createBiquadFilter();
-      vowel.type = "sawtooth";
-      vowel.frequency.setValueAtTime(isStrong ? 190 : 175, time + 0.012);
-      vowel.frequency.exponentialRampToValueAtTime(isStrong ? 150 : 138, time + 0.095);
-      vowelFilter.type = "bandpass";
-      vowelFilter.frequency.setValueAtTime(isStrong ? 760 : 690, time + 0.012);
-      vowelFilter.Q.setValueAtTime(7, time + 0.012);
-      vowelGain.gain.setValueAtTime(0.0001, time + 0.012);
-      vowelGain.gain.exponentialRampToValueAtTime(isStrong ? 0.22 : 0.13, time + 0.025);
-      vowelGain.gain.exponentialRampToValueAtTime(0.0001, time + 0.105);
-      vowel.connect(vowelFilter).connect(vowelGain).connect(audioContext.destination);
-      vowel.start(time + 0.012);
-      vowel.stop(time + 0.12);
+    function getStringProfile(stringNumber) {
+      const profiles = {
+        1: { gain: 0.8, filter: 4200, pick: 5200 },
+        2: { gain: 0.88, filter: 3800, pick: 4700 },
+        3: { gain: 0.95, filter: 3300, pick: 4100 },
+        4: { gain: 1.05, filter: 2800, pick: 3500 },
+        5: { gain: 1.12, filter: 2300, pick: 2900 },
+        6: { gain: 1.18, filter: 1900, pick: 2400 }
+      };
+      return profiles[stringNumber] || profiles[3];
     }
 
     function toggleAnswer() {
@@ -1404,7 +1422,6 @@
 
     function renderRhythmStatus() {
       const settings = getRhythmSettings();
-      const selectedNote = getSelectedNote(settings);
       const shownTime = practiceActive || remainingSeconds !== 0 ? remainingSeconds : settings.seconds;
       elements.timeLeft.textContent = `${shownTime}s`;
       elements.questionCount.textContent = String(questionTotal);
@@ -1414,29 +1431,6 @@
       elements.toggleAutoNext.classList.toggle("active", autoNextEnabled);
       elements.toggleAutoNext.textContent = autoNextEnabled ? "自动中" : "自动下一题";
       elements.exerciseReadout.textContent = currentExercise.map((pattern, index) => `${index + 1}: ${pattern.name}`).join(" / ") || "随机十六分组合";
-      elements.answerPanel.hidden = !answerVisible;
-      elements.answerText.textContent = buildAnswerText(settings, selectedNote);
-    }
-
-    function buildAnswerText(settings, selectedNote) {
-      if (!currentExercise.length) {
-        return "先生成一道题。";
-      }
-
-      const parts = currentExercise.map((pattern, index) => {
-        return `第 ${index + 1} 拍：按 ${pattern.count} 弹 ${pattern.name}，拨片 ${describePickPattern(pattern)}`;
-      });
-      return `用 ${selectedNote.string.number}弦 ${settings.tabFret} 品（${selectedNote.name}，吉他谱实际音高，五线谱按吉他记谱高八度显示）弹。${parts.join("；")}。节拍器强拍为第 1 拍，其他拍为弱拍；答案声音会在每个需要拨弦的位置发“哒”。`;
-    }
-
-    function describePickPattern(pattern) {
-      let cursor = 0;
-      const directions = pattern.durations.map((duration) => {
-        const direction = getPickDirection(cursor);
-        cursor += duration;
-        return direction;
-      });
-      return directions.join("-");
     }
 
     function renderRhythmNotation(settings) {
@@ -1510,7 +1504,7 @@
         if (note.duration === 3) {
           lines.push(`<circle cx="${note.x + 14}" cy="${note.staffY - 1}" r="1.8" fill="#202124"/>`);
         }
-        lines.push(`<text x="${note.x}" y="${tabTop - 39}" text-anchor="middle" font-size="14" font-weight="850" fill="#bd4b32">${getPickDirection(note.onset)}</text>`);
+        lines.push(`<text x="${note.x}" y="${tabTop - 39}" text-anchor="middle" font-size="14" font-weight="850" fill="#bd4b32">${note.pick}</text>`);
         if (note.duration < 4 && !beams.some((beam) => beam.notes.includes(note))) {
           const hook = note.duration === 1 ? 16 : 12;
           lines.push(`<path d="M ${stemX} ${stemTop} q ${hook} 4 ${hook} 14" fill="none" stroke="#202124" stroke-width="2"/>`);
@@ -1553,8 +1547,9 @@
 
       currentExercise.forEach((pattern, beatIndex) => {
         const beatX = xStart + beatIndex * (beatWidth + beatGap);
+        const pickOffset = countNotesBeforeBeat(beatIndex);
         let cursor = 0;
-        pattern.durations.forEach((duration) => {
+        pattern.durations.forEach((duration, noteIndex) => {
           events.push({
             x: beatX + cursor * subWidth,
             staffY,
@@ -1562,7 +1557,7 @@
             beatIndex,
             onset: cursor,
             pulse: beatIndex * 4 + cursor,
-            pick: getPickDirection(cursor)
+            pick: getPickDirection(pickOffset + noteIndex)
           });
           cursor += duration;
         });
@@ -1571,8 +1566,17 @@
       return events;
     }
 
-    function getPickDirection(onset) {
-      return onset % 2 === 0 ? "下" : "上";
+    function countNotesBeforeBeat(beatIndex) {
+      let count = 0;
+      for (let index = 0; index < beatIndex; index += 1) {
+        const pattern = currentExercise[index % currentExercise.length];
+        count += pattern ? pattern.durations.length : 0;
+      }
+      return count;
+    }
+
+    function getPickDirection(noteIndex) {
+      return noteIndex % 2 === 0 ? "下" : "上";
     }
 
     function midiToStaffY(midi) {
