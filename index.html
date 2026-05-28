@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>吉他助教 - 调式指板推演</title>
+  <title>吉他助教</title>
   <style>
     :root {
       color-scheme: light;
@@ -14,16 +14,13 @@
       --muted: #6d6a62;
       --line: #d9d3c7;
       --wood: #9c5d37;
-      --wood-dark: #65391f;
-      --string: #6f7784;
-      --fret: #d6c2a5;
-      --scale: #e9f7f1;
-      --scale-border: #4aa17b;
       --position: #fff4c8;
       --position-strong: #f3bd3d;
       --root: #234d9f;
       --root-bg: #e5edff;
-      --outside: rgba(32, 33, 36, 0.36);
+      --scale: #e9f7f1;
+      --scale-border: #4aa17b;
+      --accent: #bd4b32;
       --shadow: 0 18px 50px rgba(54, 41, 23, 0.12);
     }
 
@@ -46,6 +43,11 @@
     input,
     select {
       font: inherit;
+    }
+
+    button {
+      border: 0;
+      cursor: pointer;
     }
 
     .app {
@@ -75,8 +77,8 @@
       font-size: 15px;
     }
 
-    .current-key {
-      min-width: 190px;
+    .current-card {
+      min-width: 210px;
       padding: 12px 14px;
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -84,14 +86,14 @@
       box-shadow: var(--shadow);
     }
 
-    .current-key span {
+    .current-card span {
       display: block;
       color: var(--muted);
       font-size: 12px;
       margin-bottom: 5px;
     }
 
-    .current-key strong {
+    .current-card strong {
       display: block;
       font-size: 20px;
       line-height: 1.2;
@@ -104,12 +106,45 @@
       box-shadow: var(--shadow);
     }
 
+    .mode-tabs {
+      display: inline-grid;
+      grid-template-columns: repeat(2, minmax(130px, 1fr));
+      gap: 4px;
+      padding: 4px;
+      margin-bottom: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface-2);
+    }
+
+    .mode-tab {
+      min-height: 40px;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      font-weight: 760;
+    }
+
+    .mode-tab.active {
+      background: #fff;
+      color: var(--ink);
+      box-shadow: 0 1px 8px rgba(32, 33, 36, 0.12);
+    }
+
+    .mode-view[hidden] {
+      display: none;
+    }
+
     .controls {
       display: grid;
-      grid-template-columns: repeat(5, minmax(160px, 1fr));
+      grid-template-columns: repeat(4, minmax(160px, 1fr));
       gap: 14px;
       padding: 16px;
       margin-bottom: 16px;
+    }
+
+    .rhythm-controls {
+      grid-template-columns: repeat(5, minmax(140px, 1fr));
     }
 
     .control {
@@ -118,8 +153,7 @@
       min-width: 0;
     }
 
-    .control label,
-    .switch-label {
+    .control label {
       color: var(--muted);
       font-size: 13px;
       font-weight: 650;
@@ -140,9 +174,10 @@
     select:focus,
     input[type="number"]:focus,
     input[type="range"]:focus-visible,
-    .switch input:focus-visible + .switch-track {
+    button:focus-visible {
       border-color: var(--root);
       box-shadow: 0 0 0 3px rgba(35, 77, 159, 0.16);
+      outline: none;
     }
 
     input[type="range"] {
@@ -157,52 +192,25 @@
       gap: 10px;
     }
 
-    .switch {
-      display: flex;
-      align-items: center;
-      gap: 10px;
+    .button-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      align-items: end;
+    }
+
+    .action-button {
       min-height: 42px;
-      cursor: pointer;
-      user-select: none;
+      border-radius: 8px;
+      background: var(--root);
+      color: #fff;
+      font-weight: 780;
     }
 
-    .switch input {
-      position: absolute;
-      opacity: 0;
-      pointer-events: none;
-    }
-
-    .switch-track {
-      position: relative;
-      width: 50px;
-      height: 28px;
+    .action-button.secondary {
       border: 1px solid var(--line);
-      border-radius: 999px;
-      background: var(--surface-2);
-      transition: background 160ms ease, border-color 160ms ease;
-      flex: 0 0 auto;
-    }
-
-    .switch-track::after {
-      content: "";
-      position: absolute;
-      top: 3px;
-      left: 3px;
-      width: 20px;
-      height: 20px;
-      border-radius: 50%;
       background: #fff;
-      box-shadow: 0 2px 7px rgba(0, 0, 0, 0.2);
-      transition: transform 160ms ease;
-    }
-
-    .switch input:checked + .switch-track {
-      border-color: var(--scale-border);
-      background: var(--scale-border);
-    }
-
-    .switch input:checked + .switch-track::after {
-      transform: translateX(22px);
+      color: var(--ink);
     }
 
     .fretboard-shell {
@@ -210,7 +218,7 @@
       margin-bottom: 16px;
     }
 
-    .fretboard-header {
+    .section-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -218,19 +226,20 @@
       padding: 14px 16px 0;
     }
 
-    .fretboard-header h2 {
+    .section-header h2 {
       margin: 0;
       font-size: 18px;
       line-height: 1.25;
     }
 
-    .position-readout {
+    .readout {
       color: var(--muted);
       font-size: 13px;
       white-space: nowrap;
     }
 
-    .fretboard-scroll {
+    .fretboard-scroll,
+    .notation-scroll {
       overflow-x: auto;
       padding: 12px 16px 16px;
     }
@@ -338,11 +347,7 @@
     }
 
     .fret-cell.outside-position {
-      opacity: 0.5;
-    }
-
-    .fret-cell.muted {
-      opacity: 0.34;
+      opacity: 0.62;
     }
 
     .fret-cell.position-column {
@@ -395,7 +400,7 @@
       font-weight: 700;
     }
 
-    .scale-summary {
+    .summary-grid {
       display: grid;
       grid-template-columns: minmax(220px, 1fr) 2fr;
       gap: 16px;
@@ -442,6 +447,7 @@
       align-items: center;
       color: var(--muted);
       font-size: 13px;
+      margin-bottom: 16px;
     }
 
     .legend-item {
@@ -473,6 +479,61 @@
       background: var(--scale);
     }
 
+    .rhythm-status {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(160px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .status-box {
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .status-box span {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .status-box strong {
+      font-size: 24px;
+      line-height: 1.1;
+    }
+
+    .notation-panel {
+      margin-bottom: 16px;
+    }
+
+    .notation {
+      display: block;
+      min-width: 720px;
+      width: 100%;
+      height: auto;
+      color: var(--ink);
+    }
+
+    .pattern-bank {
+      padding: 16px;
+    }
+
+    .pattern-bank h3 {
+      margin: 0 0 10px;
+      font-size: 15px;
+    }
+
+    @media (max-width: 1120px) {
+      .rhythm-controls {
+        grid-template-columns: repeat(3, minmax(160px, 1fr));
+      }
+    }
+
     @media (max-width: 980px) {
       .app {
         padding: 18px;
@@ -483,12 +544,13 @@
         flex-direction: column;
       }
 
-      .current-key {
+      .current-card {
         min-width: 0;
       }
 
       .controls,
-      .scale-summary {
+      .summary-grid,
+      .rhythm-status {
         grid-template-columns: 1fr 1fr;
       }
     }
@@ -502,17 +564,24 @@
         font-size: 26px;
       }
 
+      .mode-tabs {
+        width: 100%;
+      }
+
       .controls,
-      .scale-summary {
+      .summary-grid,
+      .rhythm-controls,
+      .rhythm-status {
         grid-template-columns: 1fr;
       }
 
-      .fretboard-header {
+      .section-header {
         align-items: flex-start;
         flex-direction: column;
       }
 
-      .fretboard-scroll {
+      .fretboard-scroll,
+      .notation-scroll {
         padding-left: 12px;
         padding-right: 12px;
       }
@@ -524,73 +593,149 @@
     <header class="topbar">
       <div class="title-block">
         <h1>吉他助教</h1>
-        <p>调式推演、首调唱名、标准调弦 0-24 品</p>
+        <p>调式指板推演与十六分节奏练习</p>
       </div>
-      <div class="current-key" aria-live="polite">
-        <span>当前调式</span>
-        <strong id="currentKey">C Ionian</strong>
+      <div class="current-card" aria-live="polite">
+        <span id="currentLabel">当前调式</span>
+        <strong id="currentValue">C Ionian</strong>
       </div>
     </header>
 
-    <section class="panel controls" aria-label="调式和把位控制">
-      <div class="control">
-        <label for="rootSelect">主音</label>
-        <select id="rootSelect"></select>
-      </div>
-      <div class="control">
-        <label for="modeSelect">调式</label>
-        <select id="modeSelect"></select>
-      </div>
-      <div class="control">
-        <label for="startFret">起始品</label>
-        <div class="range-pair">
-          <input id="startFret" type="range" min="0" max="24" value="5">
-          <input id="startFretNumber" type="number" min="0" max="24" value="5" inputmode="numeric">
+    <nav class="mode-tabs" aria-label="练习模式">
+      <button class="mode-tab active" type="button" data-mode="scale" aria-pressed="true">调式指板</button>
+      <button class="mode-tab" type="button" data-mode="rhythm" aria-pressed="false">十六分节奏</button>
+    </nav>
+
+    <section id="scaleMode" class="mode-view">
+      <section class="panel controls" aria-label="调式和把位控制">
+        <div class="control">
+          <label for="rootSelect">主音</label>
+          <select id="rootSelect"></select>
         </div>
-      </div>
-      <div class="control">
-        <label for="spanSelect">跨度</label>
-        <select id="spanSelect">
-          <option value="4">4 品</option>
-          <option value="5" selected>5 品</option>
-          <option value="6">6 品</option>
-        </select>
-      </div>
-      <div class="control">
-        <span class="switch-label">高亮方式</span>
-        <label class="switch">
-          <input id="positionOnly" type="checkbox" checked>
-          <span class="switch-track" aria-hidden="true"></span>
-          <span>仅把位内</span>
-        </label>
-      </div>
+        <div class="control">
+          <label for="modeSelect">调式</label>
+          <select id="modeSelect"></select>
+        </div>
+        <div class="control">
+          <label for="startFret">起始品</label>
+          <div class="range-pair">
+            <input id="startFret" type="range" min="0" max="24" value="5">
+            <input id="startFretNumber" type="number" min="0" max="24" value="5" inputmode="numeric">
+          </div>
+        </div>
+        <div class="control">
+          <label for="spanSelect">跨度</label>
+          <select id="spanSelect">
+            <option value="4">4 品</option>
+            <option value="5" selected>5 品</option>
+            <option value="6">6 品</option>
+            <option value="7">7 品</option>
+            <option value="8">8 品</option>
+          </select>
+        </div>
+      </section>
+
+      <section class="panel fretboard-shell" aria-label="吉他指板">
+        <div class="section-header">
+          <h2>指板</h2>
+          <div class="readout" id="positionReadout">把位：5-9 品</div>
+        </div>
+        <div class="fretboard-scroll">
+          <div class="fretboard" id="fretboard"></div>
+        </div>
+      </section>
+
+      <section class="panel summary-grid" aria-label="当前音阶">
+        <div class="summary-block">
+          <h3>音阶音</h3>
+          <div class="chips" id="scaleNotes"></div>
+        </div>
+        <div class="summary-block">
+          <h3>唱名与音级</h3>
+          <div class="chips" id="scaleDegrees"></div>
+        </div>
+      </section>
+
+      <section class="legend" aria-label="图例">
+        <span class="legend-item"><span class="legend-swatch position"></span>把位内音阶音</span>
+        <span class="legend-item"><span class="legend-swatch root"></span>主音</span>
+        <span class="legend-item"><span class="legend-swatch scale"></span>把位外音阶音</span>
+      </section>
     </section>
 
-    <section class="panel fretboard-shell" aria-label="吉他指板">
-      <div class="fretboard-header">
-        <h2>指板</h2>
-        <div class="position-readout" id="positionReadout">把位：5-9 品</div>
-      </div>
-      <div class="fretboard-scroll">
-        <div class="fretboard" id="fretboard"></div>
-      </div>
-    </section>
+    <section id="rhythmMode" class="mode-view" hidden>
+      <section class="panel controls rhythm-controls" aria-label="节奏练习控制">
+        <div class="control">
+          <label for="practiceDuration">练习时间</label>
+          <select id="practiceDuration">
+            <option value="30">30 秒</option>
+            <option value="60" selected>60 秒</option>
+            <option value="90">90 秒</option>
+            <option value="120">120 秒</option>
+            <option value="180">180 秒</option>
+          </select>
+        </div>
+        <div class="control">
+          <label for="exerciseBeats">题目长度</label>
+          <select id="exerciseBeats">
+            <option value="1">1 拍</option>
+            <option value="2">2 拍</option>
+            <option value="4" selected>1 小节</option>
+          </select>
+        </div>
+        <div class="control">
+          <label for="tabString">六线谱弦位</label>
+          <select id="tabString">
+            <option value="1">1弦 E</option>
+            <option value="2">2弦 B</option>
+            <option value="3" selected>3弦 G</option>
+            <option value="4">4弦 D</option>
+            <option value="5">5弦 A</option>
+            <option value="6">6弦 E</option>
+          </select>
+        </div>
+        <div class="control">
+          <label for="tabFret">六线谱品格</label>
+          <input id="tabFret" type="number" min="0" max="24" value="0" inputmode="numeric">
+        </div>
+        <div class="control">
+          <label>出题</label>
+          <div class="button-row">
+            <button id="startPractice" class="action-button" type="button">开始</button>
+            <button id="nextQuestion" class="action-button secondary" type="button">下一题</button>
+          </div>
+        </div>
+      </section>
 
-    <section class="panel scale-summary" aria-label="当前音阶">
-      <div class="summary-block">
-        <h3>音阶音</h3>
-        <div class="chips" id="scaleNotes"></div>
-      </div>
-      <div class="summary-block">
-        <h3>唱名与音级</h3>
-        <div class="chips" id="scaleDegrees"></div>
-      </div>
-    </section>
+      <section class="rhythm-status" aria-label="练习状态">
+        <div class="status-box">
+          <span>剩余时间</span>
+          <strong id="timeLeft">60s</strong>
+        </div>
+        <div class="status-box">
+          <span>题目</span>
+          <strong id="questionCount">0</strong>
+        </div>
+        <div class="status-box">
+          <span>当前组合</span>
+          <strong id="currentPattern">-</strong>
+        </div>
+      </section>
 
-    <section class="legend" aria-label="图例">
-      <span class="legend-item"><span class="legend-swatch position"></span>把位内音阶音</span>
-      <span class="legend-item"><span class="legend-swatch root"></span>主音</span>
-      <span class="legend-item"><span class="legend-swatch scale"></span>把位外音阶音</span>
+      <section class="panel notation-panel" aria-label="五线谱和吉他六线谱">
+        <div class="section-header">
+          <h2>谱面</h2>
+          <div class="readout" id="exerciseReadout">随机十六分组合</div>
+        </div>
+        <div class="notation-scroll">
+          <div id="notationMount"></div>
+        </div>
+      </section>
+
+      <section class="panel pattern-bank" aria-label="十六分组合题库">
+        <h3>组合题库</h3>
+        <div class="chips" id="patternBank"></div>
+      </section>
     </section>
   </main>
 
@@ -636,20 +781,52 @@
       { number: 6, label: "E", pc: 4 }
     ];
 
+    const rhythmPatterns = [
+      { id: "quarter", name: "四分音符", count: "1", durations: [4] },
+      { id: "eighth-eighth", name: "两个八分", count: "1 &", durations: [2, 2] },
+      { id: "four-sixteenths", name: "四个十六分", count: "1 e & a", durations: [1, 1, 1, 1] },
+      { id: "eighth-two-sixteenths", name: "前八后十六", count: "1 & a", durations: [2, 1, 1] },
+      { id: "two-sixteenths-eighth", name: "前十六后八", count: "1 e &", durations: [1, 1, 2] },
+      { id: "sixteenth-eighth-sixteenth", name: "十六-八-十六", count: "1 e a", durations: [1, 2, 1] },
+      { id: "dotted-eighth-sixteenth", name: "附点八分+十六", count: "1 a", durations: [3, 1] },
+      { id: "sixteenth-dotted-eighth", name: "十六+附点八分", count: "1 e", durations: [1, 3] }
+    ];
+
     const fretCount = 24;
+    let activeMode = "scale";
+    let practiceTimer = null;
+    let practiceActive = false;
+    let remainingSeconds = 60;
+    let questionTotal = 0;
+    let currentExercise = [];
 
     const elements = {
+      currentLabel: document.getElementById("currentLabel"),
+      currentValue: document.getElementById("currentValue"),
+      modeTabs: Array.from(document.querySelectorAll(".mode-tab")),
+      scaleMode: document.getElementById("scaleMode"),
+      rhythmMode: document.getElementById("rhythmMode"),
       rootSelect: document.getElementById("rootSelect"),
       modeSelect: document.getElementById("modeSelect"),
       startFret: document.getElementById("startFret"),
       startFretNumber: document.getElementById("startFretNumber"),
       spanSelect: document.getElementById("spanSelect"),
-      positionOnly: document.getElementById("positionOnly"),
-      currentKey: document.getElementById("currentKey"),
       positionReadout: document.getElementById("positionReadout"),
       fretboard: document.getElementById("fretboard"),
       scaleNotes: document.getElementById("scaleNotes"),
-      scaleDegrees: document.getElementById("scaleDegrees")
+      scaleDegrees: document.getElementById("scaleDegrees"),
+      practiceDuration: document.getElementById("practiceDuration"),
+      exerciseBeats: document.getElementById("exerciseBeats"),
+      tabString: document.getElementById("tabString"),
+      tabFret: document.getElementById("tabFret"),
+      startPractice: document.getElementById("startPractice"),
+      nextQuestion: document.getElementById("nextQuestion"),
+      timeLeft: document.getElementById("timeLeft"),
+      questionCount: document.getElementById("questionCount"),
+      currentPattern: document.getElementById("currentPattern"),
+      exerciseReadout: document.getElementById("exerciseReadout"),
+      notationMount: document.getElementById("notationMount"),
+      patternBank: document.getElementById("patternBank")
     };
 
     function initControls() {
@@ -666,24 +843,15 @@
         option.textContent = `${mode.name} - ${mode.zh}`;
         elements.modeSelect.append(option);
       });
-    }
 
-    function getState() {
-      const rootPc = clampNumber(Number(elements.rootSelect.value), 0, 11);
-      const start = clampNumber(Number(elements.startFret.value), 0, fretCount);
-      const span = clampNumber(Number(elements.spanSelect.value), 4, 6);
-      const end = Math.min(fretCount, start + span - 1);
-      const mode = modes.find((item) => item.name === elements.modeSelect.value) || modes[0];
-
-      return {
-        rootPc,
-        rootName: pitchNames[rootPc],
-        mode,
-        start,
-        end,
-        span,
-        positionOnly: elements.positionOnly.checked
-      };
+      const fragment = document.createDocumentFragment();
+      rhythmPatterns.forEach((pattern) => {
+        const chip = document.createElement("span");
+        chip.className = "chip";
+        chip.textContent = `${pattern.name} · ${pattern.count}`;
+        fragment.append(chip);
+      });
+      elements.patternBank.replaceChildren(fragment);
     }
 
     function clampNumber(value, min, max) {
@@ -701,8 +869,25 @@
       return [base, ...classes.filter(Boolean)].join(" ");
     }
 
-    function render() {
-      const state = getState();
+    function getScaleState() {
+      const rootPc = clampNumber(Number(elements.rootSelect.value), 0, 11);
+      const start = clampNumber(Number(elements.startFret.value), 0, fretCount);
+      const span = clampNumber(Number(elements.spanSelect.value), 4, 8);
+      const end = Math.min(fretCount, start + span - 1);
+      const mode = modes.find((item) => item.name === elements.modeSelect.value) || modes[0];
+
+      return {
+        rootPc,
+        rootName: pitchNames[rootPc],
+        mode,
+        start,
+        end,
+        span
+      };
+    }
+
+    function renderScaleMode() {
+      const state = getScaleState();
       const intervalSet = new Set(state.mode.intervals);
       const visibleScaleIntervals = state.mode.intervals.map((interval) => ({
         interval,
@@ -712,11 +897,15 @@
 
       elements.startFret.value = String(state.start);
       elements.startFretNumber.value = String(state.start);
-      elements.currentKey.textContent = `${state.rootName} ${state.mode.name}`;
       elements.positionReadout.textContent = `把位：${state.start}-${state.end} 品`;
 
+      if (activeMode === "scale") {
+        elements.currentLabel.textContent = "当前调式";
+        elements.currentValue.textContent = `${state.rootName} ${state.mode.name}`;
+      }
+
       renderFretboard(state, intervalSet);
-      renderSummary(visibleScaleIntervals);
+      renderScaleSummary(visibleScaleIntervals);
     }
 
     function renderFretboard(state, intervalSet) {
@@ -749,16 +938,14 @@
           const interval = intervalFromRoot(pc, state.rootPc);
           const inScale = intervalSet.has(interval);
           const inPosition = fret >= state.start && fret <= state.end;
-          const showScale = inScale && (!state.positionOnly || inPosition);
-          const isRoot = pc === state.rootPc && showScale;
+          const isRoot = pc === state.rootPc && inScale;
           const meta = intervalMeta[interval];
           const cell = document.createElement("div");
 
           cell.className = makeClassList("fret-cell", [
             inPosition && "position-column",
-            inScale && showScale && "scale-note",
-            inScale && !inPosition && !state.positionOnly && "outside-position",
-            inScale && !showScale && "muted",
+            inScale && "scale-note",
+            inScale && !inPosition && "outside-position",
             inPosition && "in-position",
             isRoot && "root-note",
             fret === state.start && "position-start",
@@ -770,7 +957,7 @@
             `${string.number}弦 ${fret}品 ${pitchNames[pc]}${inScale ? ` ${meta.solfege} ${meta.degree}` : ""}`
           );
 
-          if (showScale) {
+          if (inScale) {
             cell.innerHTML = `
               <span class="note-name">${pitchNames[pc]}</span>
               <span class="solfege">${meta.solfege}</span>
@@ -785,7 +972,7 @@
       elements.fretboard.replaceChildren(fragment);
     }
 
-    function renderSummary(scaleIntervals) {
+    function renderScaleSummary(scaleIntervals) {
       const noteFragment = document.createDocumentFragment();
       const degreeFragment = document.createDocumentFragment();
 
@@ -809,21 +996,256 @@
       const nextValue = clampNumber(Number(value), 0, fretCount);
       elements.startFret.value = String(nextValue);
       elements.startFretNumber.value = String(nextValue);
-      render();
+      renderScaleMode();
+    }
+
+    function switchMode(nextMode) {
+      activeMode = nextMode;
+      elements.scaleMode.hidden = nextMode !== "scale";
+      elements.rhythmMode.hidden = nextMode !== "rhythm";
+      elements.modeTabs.forEach((tab) => {
+        const isActive = tab.dataset.mode === nextMode;
+        tab.classList.toggle("active", isActive);
+        tab.setAttribute("aria-pressed", String(isActive));
+      });
+
+      if (nextMode === "scale") {
+        renderScaleMode();
+      } else {
+        renderRhythmHeader();
+        renderRhythmStatus();
+        if (!currentExercise.length) {
+          nextRhythmQuestion(false);
+        }
+      }
+    }
+
+    function renderRhythmHeader() {
+      elements.currentLabel.textContent = "当前模式";
+      elements.currentValue.textContent = "十六分节奏";
+    }
+
+    function getRhythmSettings() {
+      return {
+        seconds: clampNumber(Number(elements.practiceDuration.value), 30, 180),
+        beats: clampNumber(Number(elements.exerciseBeats.value), 1, 4),
+        tabString: clampNumber(Number(elements.tabString.value), 1, 6),
+        tabFret: clampNumber(Number(elements.tabFret.value), 0, 24)
+      };
+    }
+
+    function randomPattern() {
+      return rhythmPatterns[Math.floor(Math.random() * rhythmPatterns.length)];
+    }
+
+    function nextRhythmQuestion(countQuestion = true) {
+      const settings = getRhythmSettings();
+      currentExercise = Array.from({ length: settings.beats }, () => randomPattern());
+      if (countQuestion) {
+        questionTotal += 1;
+      }
+      renderRhythmNotation(settings);
+      renderRhythmStatus();
+    }
+
+    function startPractice() {
+      if (practiceActive) {
+        stopPractice();
+        return;
+      }
+
+      const settings = getRhythmSettings();
+      remainingSeconds = settings.seconds;
+      questionTotal = 0;
+      practiceActive = true;
+      elements.startPractice.textContent = "停止";
+      nextRhythmQuestion(true);
+      renderRhythmStatus();
+
+      practiceTimer = window.setInterval(() => {
+        remainingSeconds -= 1;
+        if (remainingSeconds <= 0) {
+          remainingSeconds = 0;
+          stopPractice();
+        }
+        renderRhythmStatus();
+      }, 1000);
+    }
+
+    function stopPractice() {
+      practiceActive = false;
+      elements.startPractice.textContent = "开始";
+      if (practiceTimer) {
+        window.clearInterval(practiceTimer);
+        practiceTimer = null;
+      }
+      renderRhythmStatus();
+    }
+
+    function renderRhythmStatus() {
+      const settings = getRhythmSettings();
+      const shownTime = practiceActive || remainingSeconds !== 0 ? remainingSeconds : settings.seconds;
+      elements.timeLeft.textContent = `${shownTime}s`;
+      elements.questionCount.textContent = String(questionTotal);
+      elements.currentPattern.textContent = currentExercise.length === 1 ? currentExercise[0].name : `${currentExercise.length} 拍`;
+      elements.exerciseReadout.textContent = currentExercise.map((pattern, index) => `${index + 1}: ${pattern.name}`).join(" / ") || "随机十六分组合";
+    }
+
+    function renderRhythmNotation(settings) {
+      const staffTop = 30;
+      const staffGap = 10;
+      const tabTop = 126;
+      const tabGap = 10;
+      const noteY = staffTop + staffGap * 3;
+      const subWidth = 30;
+      const beatGap = 24;
+      const xStart = 86;
+      const beatWidth = subWidth * 4;
+      const width = xStart + currentExercise.length * beatWidth + Math.max(0, currentExercise.length - 1) * beatGap + 70;
+      const height = 228;
+      const tabLineIndex = settings.tabString - 1;
+      const tabY = tabTop + tabLineIndex * tabGap;
+      const notes = [];
+      const beams = [];
+
+      currentExercise.forEach((pattern, beatIndex) => {
+        const beatX = xStart + beatIndex * (beatWidth + beatGap);
+        let cursor = 0;
+        const beatNotes = pattern.durations.map((duration) => {
+          const note = {
+            x: beatX + cursor * subWidth,
+            y: noteY,
+            duration,
+            beatIndex,
+            onset: cursor
+          };
+          cursor += duration;
+          notes.push(note);
+          return note;
+        });
+        beams.push(...buildBeamSegments(beatNotes));
+      });
+
+      const lines = [];
+      lines.push(`<svg class="notation" viewBox="0 0 ${width} ${height}" role="img" aria-label="十六分节奏五线谱与吉他六线谱">`);
+      lines.push(`<rect x="0" y="0" width="${width}" height="${height}" rx="8" fill="#fffdf9"/>`);
+
+      for (let i = 0; i < 5; i += 1) {
+        const y = staffTop + i * staffGap;
+        lines.push(`<line x1="64" y1="${y}" x2="${width - 24}" y2="${y}" stroke="#202124" stroke-width="1"/>`);
+      }
+
+      lines.push(`<text x="20" y="${staffTop + 42}" font-family="Georgia, serif" font-size="42" fill="#202124">𝄞</text>`);
+      lines.push(`<text x="58" y="${staffTop + 19}" font-size="18" font-weight="760" fill="#202124">4</text>`);
+      lines.push(`<text x="58" y="${staffTop + 39}" font-size="18" font-weight="760" fill="#202124">4</text>`);
+
+      for (let i = 0; i < 6; i += 1) {
+        const y = tabTop + i * tabGap;
+        lines.push(`<line x1="64" y1="${y}" x2="${width - 24}" y2="${y}" stroke="#202124" stroke-width="1"/>`);
+      }
+
+      lines.push(`<text x="18" y="${tabTop + 35}" font-size="24" font-weight="800" fill="#202124">TAB</text>`);
+
+      currentExercise.forEach((pattern, beatIndex) => {
+        const x = xStart + beatIndex * (beatWidth + beatGap);
+        lines.push(`<line x1="${x - 12}" y1="${staffTop}" x2="${x - 12}" y2="${staffTop + staffGap * 4}" stroke="#202124" stroke-width="1"/>`);
+        lines.push(`<line x1="${x - 12}" y1="${tabTop}" x2="${x - 12}" y2="${tabTop + tabGap * 5}" stroke="#202124" stroke-width="1"/>`);
+        lines.push(`<text x="${x}" y="${height - 22}" font-size="12" fill="#6d6a62">${pattern.count}</text>`);
+      });
+
+      lines.push(`<line x1="${width - 28}" y1="${staffTop}" x2="${width - 28}" y2="${staffTop + staffGap * 4}" stroke="#202124" stroke-width="2"/>`);
+      lines.push(`<line x1="${width - 28}" y1="${tabTop}" x2="${width - 28}" y2="${tabTop + tabGap * 5}" stroke="#202124" stroke-width="2"/>`);
+
+      notes.forEach((note) => {
+        const stemX = note.x + 7;
+        const stemTop = note.y - 38;
+        lines.push(`<ellipse cx="${note.x}" cy="${note.y}" rx="7.2" ry="5.1" transform="rotate(-20 ${note.x} ${note.y})" fill="#202124"/>`);
+        lines.push(`<line x1="${stemX}" y1="${note.y}" x2="${stemX}" y2="${stemTop}" stroke="#202124" stroke-width="1.7"/>`);
+        if (note.duration === 3) {
+          lines.push(`<circle cx="${note.x + 14}" cy="${note.y - 1}" r="1.8" fill="#202124"/>`);
+        }
+        if (note.duration < 4 && !beams.some((beam) => beam.notes.includes(note))) {
+          const hook = note.duration === 1 ? 16 : 12;
+          lines.push(`<path d="M ${stemX} ${stemTop} q ${hook} 4 ${hook} 14" fill="none" stroke="#202124" stroke-width="2"/>`);
+          if (note.duration === 1) {
+            lines.push(`<path d="M ${stemX} ${stemTop + 8} q ${hook} 4 ${hook} 14" fill="none" stroke="#202124" stroke-width="2"/>`);
+          }
+        }
+        lines.push(`<rect x="${note.x - 9}" y="${tabY - 7}" width="18" height="14" fill="#fffdf9"/>`);
+        lines.push(`<text x="${note.x}" y="${tabY + 5}" text-anchor="middle" font-size="14" font-weight="760" fill="#202124">${settings.tabFret}</text>`);
+      });
+
+      beams.forEach((beam) => {
+        const first = beam.notes[0];
+        const last = beam.notes[beam.notes.length - 1];
+        const x1 = first.x + 7;
+        const x2 = last.x + 7;
+        const y = noteY - 38 + beam.level * 8;
+        if (x1 === x2) {
+          const direction = first.onset >= 2 ? -1 : 1;
+          lines.push(`<rect x="${direction > 0 ? x1 : x1 - 14}" y="${y}" width="14" height="4.5" fill="#202124"/>`);
+        } else {
+          lines.push(`<rect x="${x1}" y="${y}" width="${x2 - x1}" height="4.5" fill="#202124"/>`);
+        }
+      });
+
+      lines.push(`</svg>`);
+      elements.notationMount.innerHTML = lines.join("");
+    }
+
+    function buildBeamSegments(beatNotes) {
+      const beams = [];
+      const beamedNotes = beatNotes.filter((note) => note.duration < 4);
+      if (beamedNotes.length >= 2) {
+        beams.push({ level: 0, notes: beamedNotes });
+      }
+
+      const sixteenthNotes = beatNotes.filter((note) => note.duration === 1);
+      sixteenthNotes.forEach((note, index) => {
+        const previous = sixteenthNotes[index - 1];
+        const next = sixteenthNotes[index + 1];
+        const connectedToPrevious = previous && previous.onset + previous.duration === note.onset;
+        const connectedToNext = next && note.onset + note.duration === next.onset;
+        if (connectedToNext) {
+          beams.push({ level: 1, notes: [note, next] });
+        } else if (!connectedToPrevious) {
+          beams.push({ level: 1, notes: [note] });
+        }
+      });
+
+      return beams;
     }
 
     function bindEvents() {
-      elements.rootSelect.addEventListener("change", render);
-      elements.modeSelect.addEventListener("change", render);
-      elements.spanSelect.addEventListener("change", render);
-      elements.positionOnly.addEventListener("change", render);
+      elements.modeTabs.forEach((tab) => {
+        tab.addEventListener("click", () => switchMode(tab.dataset.mode));
+      });
+      elements.rootSelect.addEventListener("change", renderScaleMode);
+      elements.modeSelect.addEventListener("change", renderScaleMode);
+      elements.spanSelect.addEventListener("change", renderScaleMode);
       elements.startFret.addEventListener("input", (event) => syncStartFret(event.target.value));
       elements.startFretNumber.addEventListener("input", (event) => syncStartFret(event.target.value));
+      elements.practiceDuration.addEventListener("change", () => {
+        if (!practiceActive) {
+          remainingSeconds = getRhythmSettings().seconds;
+        }
+        renderRhythmStatus();
+      });
+      elements.exerciseBeats.addEventListener("change", () => nextRhythmQuestion(false));
+      elements.tabString.addEventListener("change", () => renderRhythmNotation(getRhythmSettings()));
+      elements.tabFret.addEventListener("input", () => {
+        const settings = getRhythmSettings();
+        elements.tabFret.value = String(settings.tabFret);
+        renderRhythmNotation(settings);
+      });
+      elements.startPractice.addEventListener("click", startPractice);
+      elements.nextQuestion.addEventListener("click", () => nextRhythmQuestion(true));
     }
 
     initControls();
     bindEvents();
-    render();
+    remainingSeconds = getRhythmSettings().seconds;
+    renderScaleMode();
   </script>
 </body>
 </html>
