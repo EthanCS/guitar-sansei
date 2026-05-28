@@ -854,6 +854,7 @@
     let exerciseCycleStart = 0;
     let autoNextEnabled = false;
     let autoNextCycle = -1;
+    let committedBpm = 80;
     let audioContext = null;
 
     const elements = {
@@ -1094,8 +1095,19 @@
         beats: clampNumber(Number(elements.exerciseBeats.value), 1, 4),
         tabString: clampNumber(Number(elements.tabString.value), 1, 6),
         tabFret: clampNumber(Number(elements.tabFret.value), 0, 24),
-        bpm: clampNumber(Number(elements.bpmInput.value), 40, 240)
+        bpm: committedBpm
       };
+    }
+
+    function commitBpmInput() {
+      const nextBpm = clampNumber(Number(elements.bpmInput.value), 40, 240);
+      committedBpm = nextBpm;
+      elements.bpmInput.value = String(nextBpm);
+      const settings = getRhythmSettings();
+      if (metronomeActive) {
+        restartRhythmPhase(settings);
+      }
+      renderRhythmStatus();
     }
 
     function getSelectedString(settings) {
@@ -1642,13 +1654,21 @@
         renderRhythmStatus();
       });
       elements.bpmInput.addEventListener("input", () => {
-        ensureMetronomeRunning();
-        const settings = getRhythmSettings();
-        elements.bpmInput.value = String(settings.bpm);
-        if (metronomeActive) {
-          restartRhythmPhase(settings);
+        const rawValue = elements.bpmInput.value.trim();
+        if (rawValue === "") {
+          elements.metronomeStatus.textContent = `${committedBpm} BPM`;
+          return;
         }
-        renderRhythmStatus();
+        const preview = Number(rawValue);
+        elements.metronomeStatus.textContent = Number.isFinite(preview) ? `${Math.round(preview)} BPM` : `${committedBpm} BPM`;
+      });
+      elements.bpmInput.addEventListener("change", commitBpmInput);
+      elements.bpmInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          commitBpmInput();
+          elements.bpmInput.blur();
+        }
       });
       elements.startPractice.addEventListener("click", startPractice);
       elements.nextQuestion.addEventListener("click", () => nextRhythmQuestion(true));
